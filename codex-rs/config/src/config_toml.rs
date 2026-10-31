@@ -708,6 +708,10 @@ pub struct AgentsToml {
     pub default_subagent_model: Option<String>,
     /// Default reasoning effort for spawned subagents when the spawn call does not select one.
     pub default_subagent_reasoning_effort: Option<ReasoningEffort>,
+    /// Enables adaptive model routing for all main-thread messages or only delegated subagents.
+    pub model_routing: Option<AgentModelRoutingScope>,
+    /// Model used when adaptive routing selects the simpler tier. Defaults to `gpt-6-luna`.
+    pub simple_model: Option<String>,
     /// Removed agent-job setting retained as a no-op for compatibility.
     #[schemars(skip)]
     pub job_max_runtime_seconds: Option<u64>,
@@ -726,6 +730,16 @@ pub struct AgentsToml {
     /// ```
     #[serde(default, flatten)]
     pub roles: BTreeMap<String, AgentRoleToml>,
+}
+
+/// Selects which Codex requests the adaptive model router may route.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentModelRoutingScope {
+    /// Classify each main-thread request and also allow the main model to route subagents.
+    All,
+    /// Route only delegated subagent tasks selected by the main model.
+    SubagentsOnly,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]

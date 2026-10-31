@@ -27,6 +27,8 @@ pub struct SpawnAgentToolOptions {
     pub expose_agent_type: bool,
     pub hide_agent_type_model_reasoning: bool,
     pub expose_spawn_agent_model_overrides: bool,
+    pub adaptive_model_routing_simple_model: Option<String>,
+    pub adaptive_model_routing_regular_model: Option<String>,
     pub multi_agent_version: MultiAgentVersion,
     pub usage_hint_text: Option<String>,
 }
@@ -39,6 +41,8 @@ impl Default for SpawnAgentToolOptions {
             expose_agent_type: true,
             hide_agent_type_model_reasoning: false,
             expose_spawn_agent_model_overrides: false,
+            adaptive_model_routing_simple_model: None,
+            adaptive_model_routing_regular_model: None,
             multi_agent_version: MultiAgentVersion::Disabled,
             usage_hint_text: None,
         }
@@ -83,11 +87,15 @@ pub fn create_spawn_agent_tool_v1(options: SpawnAgentToolOptions) -> ToolSpec {
         description: MULTI_AGENT_V1_NAMESPACE_DESCRIPTION.to_string(),
         tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
             name: "spawn_agent".to_string(),
-            description: spawn_agent_tool_description(
-                available_models_description.as_deref(),
-                inherited_model_guidance,
-                return_value_description,
-                options.usage_hint_text,
+            description: append_adaptive_model_routing_guidance(
+                spawn_agent_tool_description(
+                    available_models_description.as_deref(),
+                    inherited_model_guidance,
+                    return_value_description,
+                    options.usage_hint_text,
+                ),
+                options.adaptive_model_routing_simple_model.as_deref(),
+                options.adaptive_model_routing_regular_model.as_deref(),
             ),
             strict: false,
             defer_loading: None,
@@ -125,11 +133,15 @@ pub fn create_spawn_agent_tool_v2(
 
     ToolSpec::Function(ResponsesApiTool {
         name: "spawn_agent".to_string(),
-        description: spawn_agent_tool_description_v2(
-            available_models_description.as_deref(),
-            inherited_model_guidance,
-            options.usage_hint_text,
-            description_override,
+        description: append_adaptive_model_routing_guidance(
+            spawn_agent_tool_description_v2(
+                available_models_description.as_deref(),
+                inherited_model_guidance,
+                options.usage_hint_text,
+                description_override,
+            ),
+            options.adaptive_model_routing_simple_model.as_deref(),
+            options.adaptive_model_routing_regular_model.as_deref(),
         ),
         strict: false,
         defer_loading: None,
@@ -142,6 +154,27 @@ pub fn create_spawn_agent_tool_v2(
             spawn_agent_output_schema_v2(options.hide_agent_type_model_reasoning).into(),
         ),
     })
+}
+
+fn append_adaptive_model_routing_guidance(
+    description: String,
+    simple_model: Option<&str>,
+    regular_model: Option<&str>,
+) -> String {
+    let Some(simple_model) = simple_model else {
+        return description;
+    };
+    let regular_model = regular_model.unwrap_or("the regular/default model");
+    let regular_model_guidance = format!(
+        "For model routing, classify each delegated task before spawning: set `model` to the configured simple model only when it can adequately complete the task; otherwise use `{regular_model}` as the regular tier. If a simple-model subagent finishes with `CODEX_SIMPLE_MODEL_ESCALATION: yes`, spawn a second subagent for the same task with `model` set to `{regular_model}`, include the first subagent's response and escalation reason, and wait for the second response. Do not repeat escalation."
+    );
+    let description = description.replace(
+        "Do not set the `model` field unless the user explicitly asks for a different model.",
+        &regular_model_guidance,
+    );
+    format!(
+        "{description}\n\nAdaptive routing is enabled. The configured simple model is `{simple_model}`. {regular_model_guidance}"
+    )
 }
 
 pub fn create_send_input_tool_v1() -> ToolSpec {

@@ -25,6 +25,7 @@ use codex_config::ResidencyRequirement;
 use codex_config::SandboxModeRequirement;
 use codex_config::Sourced;
 use codex_config::ThreadConfigLoader;
+use codex_config::config_toml::AgentModelRoutingScope;
 use codex_config::config_toml::ConfigToml;
 use codex_config::config_toml::DEFAULT_PROJECT_DOC_MAX_BYTES;
 use codex_config::config_toml::ProjectConfig;
@@ -901,6 +902,12 @@ pub struct Config {
 
     /// Default model for spawned subagents when the spawn call does not select one.
     pub agent_default_subagent_model: Option<String>,
+
+    /// Scope in which adaptive model routing is active, when configured.
+    pub agent_model_routing_scope: Option<AgentModelRoutingScope>,
+
+    /// Model selected for tasks classified as simple by adaptive routing.
+    pub agent_simple_model: String,
 
     /// Default reasoning effort for spawned subagents when the spawn call does not select one.
     pub agent_default_subagent_reasoning_effort: Option<ReasoningEffort>,
@@ -3823,6 +3830,21 @@ impl Config {
             .agents
             .as_ref()
             .and_then(|agents| agents.default_subagent_model.clone());
+        let agent_model_routing_scope = cfg
+            .agents
+            .as_ref()
+            .and_then(|agents| agents.model_routing);
+        let agent_simple_model = cfg
+            .agents
+            .as_ref()
+            .and_then(|agents| agents.simple_model.clone())
+            .unwrap_or_else(|| "gpt-6-luna".to_string());
+        if agent_model_routing_scope.is_some() && agent_simple_model.trim().is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "agents.simple_model must not be empty when agents.model_routing is enabled",
+            ));
+        }
         let agent_default_subagent_reasoning_effort = cfg
             .agents
             .as_ref()
@@ -4270,6 +4292,8 @@ impl Config {
             agents_enabled,
             agent_max_threads,
             agent_default_subagent_model,
+            agent_model_routing_scope,
+            agent_simple_model,
             agent_default_subagent_reasoning_effort,
             agent_max_depth,
             agent_roles,

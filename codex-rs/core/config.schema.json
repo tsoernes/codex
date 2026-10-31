@@ -6,6 +6,25 @@
       "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
       "type": "string"
     },
+    "AgentModelRoutingScope": {
+      "description": "Selects which Codex requests the adaptive model router may route.",
+      "oneOf": [
+        {
+          "description": "Classify each main-thread request and also allow the main model to route subagents.",
+          "enum": [
+            "all"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Route only delegated subagent tasks selected by the main model.",
+          "enum": [
+            "subagents_only"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "AgentRoleToml": {
       "additionalProperties": false,
       "properties": {
@@ -66,6 +85,18 @@
           "description": "Maximum nesting depth for V1 agent threads. Ignored by V2.",
           "format": "int32",
           "type": "integer"
+        },
+        "model_routing": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AgentModelRoutingScope"
+            }
+          ],
+          "description": "Enables adaptive model routing for all main-thread messages or only delegated subagents."
+        },
+        "simple_model": {
+          "description": "Model used when adaptive routing selects the simpler tier. Defaults to `gpt-6-luna`.",
+          "type": "string"
         }
       },
       "type": "object"

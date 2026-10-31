@@ -45,6 +45,7 @@ use futures::future::BoxFuture;
 use futures::future::Shared;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
 use tracing::instrument;
 
@@ -359,6 +360,30 @@ pub struct TurnContext {
     pub(crate) model_verification_emitted: AtomicBool,
     /// Effective cyber treatment for this turn, including any child-agent inheritance.
     pub(crate) cyber_access_program: Option<CyberAccessProgram>,
+    pub(crate) adaptive_model_routing_state: AtomicU8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum AdaptiveModelRoutingState {
+    Disabled = 0,
+    Pending = 1,
+    Regular = 2,
+    Simple = 3,
+    Escalated = 4,
+}
+
+impl AdaptiveModelRoutingState {
+    fn for_turn(config: &Config, session_source: &SessionSource) -> Self {
+        if config.agent_model_routing_scope
+            == Some(codex_config::config_toml::AgentModelRoutingScope::All)
+            && !session_source.is_non_root_agent()
+        {
+            Self::Pending
+        } else {
+            Self::Disabled
+        }
+    }
 }
 
 /// Selects which preparation is needed when building a turn context.
@@ -379,6 +404,22 @@ enum TurnContextBuildMode {
 }
 
 impl TurnContext {
+    pub(crate) fn adaptive_model_routing_state(&self) -> AdaptiveModelRoutingState {
+        match self.adaptive_model_routing_state.load(Ordering::Acquire) {
+            0 => AdaptiveModelRoutingState::Disabled,
+            1 => AdaptiveModelRoutingState::Pending,
+            2 => AdaptiveModelRoutingState::Regular,
+            3 => AdaptiveModelRoutingState::Simple,
+            4 => AdaptiveModelRoutingState::Escalated,
+            _ => unreachable!("adaptive model routing state comes from its enum"),
+        }
+    }
+
+    pub(crate) fn set_adaptive_model_routing_state(&self, state: AdaptiveModelRoutingState) {
+        self.adaptive_model_routing_state
+            .store(state as u8, Ordering::Release);
+    }
+
     /// Captures current model metadata without preparing a step.
     pub(crate) fn capture_current_model_info(&self) -> Arc<ModelInfo> {
         Arc::clone(&self.next_step_input.load().settings.model_info)
@@ -727,6 +768,7 @@ impl TurnContext {
                 self.model_verification_emitted.load(Ordering::Relaxed),
             ),
             cyber_access_program: self.cyber_access_program,
+            adaptive_model_routing_state: AtomicU8::new(AdaptiveModelRoutingState::Disabled as u8),
         }
     }
 
@@ -999,6 +1041,8 @@ impl Session {
         let (current_date, timezone) = local_time_context();
         let extension_data = Arc::new(codex_extension_api::ExtensionData::new(sub_id.clone()));
         extension_data.insert(skills_snapshot);
+        let adaptive_model_routing_state =
+            AdaptiveModelRoutingState::for_turn(&per_turn_config, &session_source);
         TurnContext {
             sub_id,
             trace_id: current_span_trace_id(),
@@ -1042,6 +1086,7 @@ impl Session {
             server_model_warning_emitted: AtomicBool::new(false),
             model_verification_emitted: AtomicBool::new(false),
             cyber_access_program: None,
+            adaptive_model_routing_state: AtomicU8::new(adaptive_model_routing_state as u8),
         }
     }
 

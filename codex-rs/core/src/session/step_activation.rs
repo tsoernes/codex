@@ -6,6 +6,7 @@ use super::step_context::StepInputs;
 use super::step_settings::ResolvedStepSettings;
 use super::step_settings::StepSettingsConstraints;
 use super::step_settings::StepSettingsUpdate;
+use super::turn_context::AdaptiveModelRoutingState;
 use super::turn_context::TurnContext;
 use crate::config::Config;
 use crate::config::ConstraintResult;
@@ -19,6 +20,12 @@ use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::TurnSettingsUpdate;
 use codex_protocol::protocol::TurnSettingsUpdateOutcome;
 use std::sync::Arc;
+
+#[derive(Clone, Copy)]
+enum TurnSettingsUpdateSource {
+    Client,
+    AdaptiveModelRouting(AdaptiveModelRoutingState),
+}
 
 /// Temporary restrictions while approvals and Guardian still read the admitted
 /// `TurnContext`. Ordinary live authorization is validated separately. Remove
@@ -227,12 +234,79 @@ impl Session {
         turn_id: &str,
         update: TurnSettingsUpdate,
     ) -> TurnSettingsUpdateOutcome {
+        self.apply_turn_settings_with_source(turn_id, update, TurnSettingsUpdateSource::Client)
+            .await
+    }
+
+    pub(crate) async fn apply_adaptive_model_route(
+        &self,
+        turn_id: &str,
+        target: AdaptiveModelRoutingState,
+    ) -> TurnSettingsUpdateOutcome {
+        let model = {
+            let active = self.active_turn.lock().await;
+            let Some(turn_context) = active
+                .as_ref()
+                .and_then(|active| active.task.as_ref())
+                .map(|task| &task.turn_context)
+                .filter(|turn_context| turn_context.sub_id == turn_id)
+            else {
+                return TurnSettingsUpdateOutcome::TargetUnavailable;
+            };
+            if turn_context.config.agent_model_routing_scope
+                != Some(codex_config::config_toml::AgentModelRoutingScope::All)
+                || turn_context.session_source.is_non_root_agent()
+            {
+                return TurnSettingsUpdateOutcome::Rejected {
+                    reason: "adaptive model routing is not enabled for this turn".to_string(),
+                };
+            }
+            match (turn_context.adaptive_model_routing_state(), target) {
+                (AdaptiveModelRoutingState::Pending, AdaptiveModelRoutingState::Simple) => {
+                    turn_context.config.agent_simple_model.clone()
+                }
+                (AdaptiveModelRoutingState::Pending, AdaptiveModelRoutingState::Regular)
+                | (AdaptiveModelRoutingState::Simple, AdaptiveModelRoutingState::Escalated) => {
+                    turn_context.model_info().slug.clone()
+                }
+                _ => {
+                    return TurnSettingsUpdateOutcome::Rejected {
+                        reason: "adaptive model routing has already selected a model".to_string(),
+                    };
+                }
+            }
+        };
+        let update = TurnSettingsUpdate {
+            model: Some(model),
+            ..Default::default()
+        };
+        self.apply_turn_settings_with_source(
+            turn_id,
+            update,
+            TurnSettingsUpdateSource::AdaptiveModelRouting(target),
+        )
+        .await
+    }
+
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "the final managed-policy check and active settings publication must remain atomic"
+    )]
+    async fn apply_turn_settings_with_source(
+        &self,
+        turn_id: &str,
+        update: TurnSettingsUpdate,
+        source: TurnSettingsUpdateSource,
+    ) -> TurnSettingsUpdateOutcome {
         let reviewer_only = update.approvals_reviewer.is_some()
             && update.model.is_none()
             && update.effort.is_none()
             && update.summary.is_none()
             && update.service_tier.is_none();
-        if !reviewer_only && !self.features.enabled(Feature::StepModelSwitching) {
+        if matches!(source, TurnSettingsUpdateSource::Client)
+            && !reviewer_only
+            && !self.features.enabled(Feature::StepModelSwitching)
+        {
             return TurnSettingsUpdateOutcome::Rejected {
                 reason: "turn settings updates require the step_model_switching feature"
                     .to_string(),
@@ -259,6 +333,20 @@ impl Session {
         let Some((turn_context, task_done, current)) = target else {
             return TurnSettingsUpdateOutcome::TargetUnavailable;
         };
+        if let TurnSettingsUpdateSource::AdaptiveModelRouting(target) = source {
+            let valid_target = match (turn_context.adaptive_model_routing_state(), target) {
+                (AdaptiveModelRoutingState::Pending, AdaptiveModelRoutingState::Simple)
+                | (AdaptiveModelRoutingState::Pending, AdaptiveModelRoutingState::Regular)
+                | (AdaptiveModelRoutingState::Simple, AdaptiveModelRoutingState::Escalated) => true,
+                _ => false,
+            };
+            if !valid_target {
+                return TurnSettingsUpdateOutcome::Rejected {
+                    reason: "adaptive model routing state changed before the model switch"
+                        .to_string(),
+                };
+            }
+        }
         let TurnSettingsUpdate {
             approvals_reviewer,
             model,
@@ -333,6 +421,9 @@ impl Session {
                 settings: Arc::new(destination),
                 environments: current.environments.clone(),
             }));
+        if let TurnSettingsUpdateSource::AdaptiveModelRouting(target) = source {
+            task.turn_context.set_adaptive_model_routing_state(target);
+        }
         TurnSettingsUpdateOutcome::Applied
     }
 

@@ -1565,6 +1565,8 @@ pub(crate) fn build_prompt(
         input,
         tools: step_context.tool_router.model_visible_specs(),
         parallel_tool_calls: true,
+        tool_choice_required: turn_context.adaptive_model_routing_state()
+            == crate::session::turn_context::AdaptiveModelRoutingState::Pending,
         base_instructions,
         output_schema: turn_context.final_output_json_schema.clone(),
         output_schema_strict: !crate::guardian::is_basic_session_source(

@@ -1,8 +1,10 @@
 use super::step_context::StepInputs;
 use super::step_settings::ResolvedStepSettings;
+use super::turn_context::AdaptiveModelRoutingState;
 use super::*;
 use arc_swap::ArcSwap;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU8;
 
 /// Spawn a review thread using the given prompt.
 pub(super) async fn spawn_review_thread(
@@ -193,6 +195,7 @@ pub(super) async fn spawn_review_thread(
         server_model_warning_emitted: AtomicBool::new(false),
         model_verification_emitted: AtomicBool::new(false),
         cyber_access_program: None,
+        adaptive_model_routing_state: AtomicU8::new(AdaptiveModelRoutingState::Disabled as u8),
     };
 
     // Seed the child task with the review prompt as the initial user message.

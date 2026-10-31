@@ -30,6 +30,9 @@ pub struct Prompt {
     /// Whether parallel tool calls are permitted for this prompt.
     pub(crate) parallel_tool_calls: bool,
 
+    /// Whether the model must select a tool before it can respond.
+    pub(crate) tool_choice_required: bool,
+
     pub base_instructions: BaseInstructions,
 
     /// Optional the output schema for the model's response.
@@ -47,6 +50,7 @@ impl Default for Prompt {
             input: Vec::new(),
             tools: Arc::default(),
             parallel_tool_calls: false,
+            tool_choice_required: false,
             base_instructions: BaseInstructions::default(),
             output_schema: None,
             output_schema_strict: true,

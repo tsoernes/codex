@@ -19,6 +19,7 @@ use crate::context::world_state::PermissionsState;
 use crate::context::world_state::PersistentModeState;
 use crate::context::world_state::PluginsInstructionsState;
 use crate::context::world_state::RealtimeState;
+use crate::context::world_state::SimpleModelSubagentState;
 use crate::context::world_state::ToolsState;
 use crate::context::world_state::WorldState;
 use codex_connectors::AppToolPolicyEvaluator;
@@ -280,6 +281,11 @@ impl Session {
             world_state.add_section(usage_hint);
         }
         world_state.add_section(multi_agent_mode);
+        world_state.add_section(SimpleModelSubagentState::new(
+            turn_context.config.agent_model_routing_scope.is_some()
+                && turn_context.session_source.is_non_root_agent()
+                && settings.model_info.slug == turn_context.config.agent_simple_model,
+        ));
         if !crate::guardian::is_basic_session_source(&turn_context.session_source) {
             world_state.add_section(ManagedDeveloperInstructionsState::new(
                 turn_context

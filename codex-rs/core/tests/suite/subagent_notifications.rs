@@ -93,6 +93,8 @@ const V2_REQUESTED_MODEL: &str = "gpt-5.6-sol";
 const V2_REQUESTED_REASONING_EFFORT: ReasoningEffort = ReasoningEffort::Low;
 const ROLE_MODEL: &str = "gpt-5.5";
 const ROLE_REASONING_EFFORT: ReasoningEffort = ReasoningEffort::High;
+const ROUTING_REGULAR_MODEL: &str = INHERITED_MODEL;
+const ROUTING_SIMPLE_MODEL: &str = REQUESTED_MODEL;
 const SUBAGENT_START_CONTEXT: &str = "subagent start context reaches child";
 const SUBAGENT_STOP_CONTINUATION: &str = "continue only the child";
 const INTERNAL_SUBAGENT_PROMPT: &str = "internal subagent: review";
@@ -2005,6 +2007,57 @@ async fn spawn_agent_uses_configured_subagent_defaults() -> Result<()> {
             Some(REQUESTED_REASONING_EFFORT)
         )
     );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn adaptive_simple_subagent_receives_escalation_assessment_guidance() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let (test, spawned_id, child_request_log) = setup_turn_one_with_custom_spawned_child(
+        &server,
+        json!({
+            "message": CHILD_PROMPT,
+            "model": ROUTING_SIMPLE_MODEL,
+        }),
+        /*child_response_delay*/ None,
+        /*wait_for_parent_notification*/ false,
+        INHERITED_REASONING_EFFORT,
+        |builder| {
+            builder
+                .with_model(ROUTING_REGULAR_MODEL)
+                .with_config(|config| {
+                    config.agent_model_routing_scope =
+                        Some(codex_config::config_toml::AgentModelRoutingScope::SubagentsOnly);
+                    config.agent_simple_model = ROUTING_SIMPLE_MODEL.to_string();
+                })
+        },
+    )
+    .await?;
+
+    let child_snapshot = test
+        .thread_manager
+        .get_thread(ThreadId::from_string(&spawned_id)?)
+        .await?
+        .config_snapshot()
+        .await;
+    assert_eq!(child_snapshot.model, ROUTING_SIMPLE_MODEL);
+    let child_request =
+        wait_for_request_with_model(&child_request_log, ROUTING_SIMPLE_MODEL).await?;
+    let child_body = child_request.body_json();
+    assert_eq!(child_body["model"], ROUTING_SIMPLE_MODEL);
+    let developer_messages = child_request.message_input_text_groups("developer");
+    assert!(
+        developer_messages.iter().any(|messages| {
+            messages.iter().any(|text| {
+                text.contains("CODEX_SIMPLE_MODEL_ESCALATION: yes")
+                    && text.contains("CODEX_SIMPLE_MODEL_ESCALATION: no")
+            })
+        }),
+        "developer messages: {developer_messages:#?}"
+    );
+
     Ok(())
 }
 

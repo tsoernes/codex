@@ -32,6 +32,8 @@ use crate::tools::handlers::ViewImageHandler;
 use crate::tools::handlers::WaitForEnvironmentHandler;
 use crate::tools::handlers::WriteStdinHandler;
 use crate::tools::handlers::extension_tools::ExtensionToolAdapter;
+use crate::tools::handlers::model_routing::EscalateModelHandler;
+use crate::tools::handlers::model_routing::RouteModelHandler;
 use crate::tools::handlers::multi_agents::CloseAgentHandler;
 use crate::tools::handlers::multi_agents::ResumeAgentHandler;
 use crate::tools::handlers::multi_agents::SendInputHandler;
@@ -146,6 +148,23 @@ pub(crate) fn build_tool_router(
         default_agent_type_description: &default_agent_type_description,
         wait_agent_timeouts: wait_agent_timeout_options(turn_context),
     };
+    if turn_context.adaptive_model_routing_state()
+        == crate::session::turn_context::AdaptiveModelRoutingState::Pending
+    {
+        let mut registry = ToolRegistry::with_tool_policy(Arc::clone(&session.tool_policy));
+        registry.register_trusted_with_exposure(
+            Arc::new(RouteModelHandler),
+            ToolExposure::DirectModelOnly,
+        );
+        return Ok(ToolRouter::from_parts(
+            registry,
+            vec![RouteModelHandler.spec()],
+            ToolMode::Direct,
+            BTreeMap::new(),
+            None,
+            &[],
+        ));
+    }
     let mut registry = ToolRegistry::with_tool_policy(Arc::clone(&session.tool_policy));
     add_core_tool_sources(&context, &mut registry);
 
@@ -1096,6 +1115,16 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
     let features = turn_context.config.features.get();
     let environment_mode = tool_environment_mode(context.environments);
 
+    if turn_context.adaptive_model_routing_state()
+        == crate::session::turn_context::AdaptiveModelRoutingState::Simple
+        && !turn_context.session_source.is_non_root_agent()
+    {
+        registry.register_trusted_with_exposure(
+            Arc::new(EscalateModelHandler),
+            ToolExposure::DirectModelOnly,
+        );
+    }
+
     if turn_context.config.update_plan_enabled {
         registry.add(PlanHandler);
     }
@@ -1257,6 +1286,18 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                 agent_type_description(turn_context, context.default_agent_type_description);
             let hide_spawn_agent_metadata =
                 turn_context.config.multi_agent_v2.hide_spawn_agent_metadata;
+            let adaptive_model_routing_simple_model = turn_context
+                .config
+                .agent_model_routing_scope
+                .map(|_| turn_context.config.agent_simple_model.clone());
+            let adaptive_model_routing_regular_model =
+                adaptive_model_routing_simple_model.as_ref().map(|_| {
+                    turn_context
+                        .config
+                        .agent_default_subagent_model
+                        .clone()
+                        .unwrap_or_else(|| turn_context.model_info().slug.clone())
+                });
             registry.register_trusted_with_exposure(
                 multi_agent_v2_handler(
                     SpawnAgentHandlerV2::new(
@@ -1268,7 +1309,10 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                             expose_spawn_agent_model_overrides: turn_context
                                 .config
                                 .multi_agent_v2
-                                .expose_spawn_agent_model_overrides,
+                                .expose_spawn_agent_model_overrides
+                                || adaptive_model_routing_simple_model.is_some(),
+                            adaptive_model_routing_simple_model,
+                            adaptive_model_routing_regular_model,
                             multi_agent_version: turn_context.multi_agent_version,
                             usage_hint_text: turn_context
                                 .config
@@ -1348,6 +1392,20 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                     expose_agent_type: !turn_context.config.agent_roles.is_empty(),
                     hide_agent_type_model_reasoning: false,
                     expose_spawn_agent_model_overrides: true,
+                    adaptive_model_routing_simple_model: turn_context
+                        .config
+                        .agent_model_routing_scope
+                        .map(|_| turn_context.config.agent_simple_model.clone()),
+                    adaptive_model_routing_regular_model: turn_context
+                        .config
+                        .agent_model_routing_scope
+                        .map(|_| {
+                            turn_context
+                                .config
+                                .agent_default_subagent_model
+                                .clone()
+                                .unwrap_or_else(|| turn_context.model_info().slug.clone())
+                        }),
                     multi_agent_version: turn_context.multi_agent_version,
                     usage_hint_text: turn_context.config.multi_agent_v2.usage_hint_text.clone(),
                 }),

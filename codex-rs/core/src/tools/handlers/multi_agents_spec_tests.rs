@@ -57,6 +57,8 @@ fn spawn_agent_tool_v2_requires_task_name_and_lists_visible_models() {
             expose_agent_type: true,
             hide_agent_type_model_reasoning: false,
             expose_spawn_agent_model_overrides: true,
+            adaptive_model_routing_simple_model: None,
+            adaptive_model_routing_regular_model: None,
             multi_agent_version: MultiAgentVersion::V2,
             usage_hint_text: None,
         },
@@ -179,6 +181,8 @@ fn spawn_agent_tool_v1_keeps_legacy_fork_context_field() {
         expose_agent_type: true,
         hide_agent_type_model_reasoning: false,
         expose_spawn_agent_model_overrides: true,
+        adaptive_model_routing_simple_model: None,
+        adaptive_model_routing_regular_model: None,
         multi_agent_version: MultiAgentVersion::V1,
         usage_hint_text: None,
     });
@@ -240,6 +244,8 @@ fn spawn_agent_tool_caps_visible_model_summaries() {
             expose_agent_type: true,
             hide_agent_type_model_reasoning: false,
             expose_spawn_agent_model_overrides: true,
+            adaptive_model_routing_simple_model: None,
+            adaptive_model_routing_regular_model: None,
             multi_agent_version: MultiAgentVersion::V2,
             usage_hint_text: None,
         },
@@ -289,6 +295,8 @@ fn spawn_agent_tool_keeps_model_controls_when_spawn_metadata_is_hidden() {
             expose_agent_type: false,
             hide_agent_type_model_reasoning: true,
             expose_spawn_agent_model_overrides: true,
+            adaptive_model_routing_simple_model: None,
+            adaptive_model_routing_regular_model: None,
             multi_agent_version: MultiAgentVersion::V2,
             usage_hint_text: None,
         },
@@ -325,6 +333,8 @@ fn spawn_agent_tool_hides_model_controls_without_override_exposure() {
             expose_agent_type: false,
             hide_agent_type_model_reasoning: true,
             expose_spawn_agent_model_overrides: false,
+            adaptive_model_routing_simple_model: None,
+            adaptive_model_routing_regular_model: None,
             multi_agent_version: MultiAgentVersion::V2,
             usage_hint_text: None,
         },
@@ -349,6 +359,37 @@ fn spawn_agent_tool_hides_model_controls_without_override_exposure() {
     }
     assert!(!description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE));
     assert!(!description.contains("Available model overrides"));
+}
+
+#[test]
+fn adaptive_model_routing_exposes_simple_model_and_escalation_guidance() {
+    let tool = create_spawn_agent_tool_v2(
+        SpawnAgentToolOptions {
+            expose_spawn_agent_model_overrides: true,
+            adaptive_model_routing_simple_model: Some("gpt-6-luna".to_string()),
+            adaptive_model_routing_regular_model: Some("gpt-6.1-sol".to_string()),
+            multi_agent_version: MultiAgentVersion::V2,
+            ..Default::default()
+        },
+        None,
+    );
+
+    let ToolSpec::Function(tool) = tool else {
+        panic!("spawn_agent should be a function tool");
+    };
+    let properties = tool
+        .parameters
+        .properties
+        .as_ref()
+        .expect("spawn_agent should use object params");
+    assert!(properties.contains_key("model"));
+    assert!(tool.description.contains("gpt-6-luna"));
+    assert!(
+        tool.description
+            .contains("CODEX_SIMPLE_MODEL_ESCALATION: yes")
+    );
+    assert!(tool.description.contains("spawn a second subagent"));
+    assert!(tool.description.contains("`gpt-6.1-sol`"));
 }
 
 #[test]
