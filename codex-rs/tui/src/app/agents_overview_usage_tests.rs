@@ -91,6 +91,7 @@ async fn selected_usage_is_cached_and_account_changes_discard_old_results() -> R
             token_usage: ThreadTokenUsage {
                 total: tokens.clone(),
                 last: tokens.clone(),
+                model_routing_usage: None,
                 model_context_window: None,
             },
         },

@@ -658,6 +658,8 @@ async fn thread_search_occurrences_reads_paginated_projection() -> Result<()> {
                         content: vec![AgentMessageContent::Text {
                             text: "commentary needle".to_string(),
                         }],
+                        model: None,
+                        model_tier: None,
                         phase: Some(MessagePhase::Commentary),
                         memory_citation: None,
                         delivery: None,
@@ -672,6 +674,8 @@ async fn thread_search_occurrences_reads_paginated_projection() -> Result<()> {
                         content: vec![AgentMessageContent::Text {
                             text: "😀 **Final**  \nneedle".to_string(),
                         }],
+                        model: None,
+                        model_tier: None,
                         phase: Some(MessagePhase::FinalAnswer),
                         memory_citation: None,
                         delivery: None,
@@ -1706,6 +1710,8 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
                         content: vec![AgentMessageContent::Text {
                             text: "first".to_string(),
                         }],
+                        model: None,
+                        model_tier: None,
                         phase: None,
                         memory_citation: None,
                         delivery: None,
@@ -1757,6 +1763,8 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
                 content: Vec::new(),
             },
             ThreadItem::AgentMessage {
+                model: None,
+                model_tier: None,
                 id: "agent-1".to_string(),
                 text: "first".to_string(),
                 phase: None,
@@ -1944,6 +1952,8 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
                     content: Vec::new(),
                 },
                 ThreadItem::AgentMessage {
+                    model: None,
+                    model_tier: None,
                     id: "agent-1".to_string(),
                     text: "first".to_string(),
                     phase: None,
@@ -2192,6 +2202,8 @@ fn append_agent_message(path: &Path, timestamp: &str, text: &str) -> anyhow::Res
             "timestamp": timestamp,
             "type": "event_msg",
             "payload": serde_json::to_value(EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: text.to_string(),
                 phase: None,
                 memory_citation: None,

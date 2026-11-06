@@ -1048,6 +1048,8 @@ mod tests {
         assert!(server_notification_requires_delivery(
             &ServerNotification::ItemCompleted(ItemCompletedNotification {
                 item: ThreadItem::AgentMessage {
+                    model: None,
+                    model_tier: None,
                     id: "item-1".to_string(),
                     text: "Still working".to_string(),
                     phase: None,

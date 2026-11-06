@@ -121,6 +121,8 @@ impl ToolExecutor<ToolInvocation> for RequestUserInputAsyncHandler {
                 content: vec![AgentMessageContent::Text {
                     text: messages.join("\n\n"),
                 }],
+                model: None,
+                model_tier: None,
                 phase: Some(MessagePhase::FinalAnswer),
                 memory_citation: None,
                 delivery: Some(AgentMessageDelivery::Async),

@@ -78,6 +78,8 @@ pub(super) async fn completed_history_app(
                 content: vec![AgentMessageContent::Text {
                     text: format!("{name} answer"),
                 }],
+                model: None,
+                model_tier: None,
                 phase: None,
                 memory_citation: None,
                 delivery: None,

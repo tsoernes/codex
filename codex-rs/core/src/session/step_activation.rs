@@ -35,6 +35,7 @@ fn check_legacy_turn_safety(
     current: &ResolvedStepSettings,
     destination: &ResolvedStepSettings,
     live_config: &Config,
+    source: TurnSettingsUpdateSource,
 ) -> Result<(), String> {
     let stack = &live_config.config_layer_stack;
     let requirements = stack.requirements();
@@ -83,6 +84,7 @@ fn check_legacy_turn_safety(
         &destination.model_info,
         &turn_context.config,
         live_config,
+        source,
     )
 }
 
@@ -94,11 +96,16 @@ fn check_legacy_model_safety(
     destination: &ModelInfo,
     admitted_config: &Config,
     live_config: &Config,
+    source: TurnSettingsUpdateSource,
 ) -> Result<(), String> {
-    if admitted.used_fallback_model_metadata || current.used_fallback_model_metadata {
+    if !matches!(source, TurnSettingsUpdateSource::AdaptiveModelRouting(_))
+        && (admitted.used_fallback_model_metadata || current.used_fallback_model_metadata)
+    {
         return Err("the active model has only fallback metadata".to_string());
     }
-    if destination.used_fallback_model_metadata {
+    if !matches!(source, TurnSettingsUpdateSource::AdaptiveModelRouting(_))
+        && destination.used_fallback_model_metadata
+    {
         return Err("the destination model has only fallback metadata".to_string());
     }
     let retained_models = [admitted, current];
@@ -334,12 +341,19 @@ impl Session {
             return TurnSettingsUpdateOutcome::TargetUnavailable;
         };
         if let TurnSettingsUpdateSource::AdaptiveModelRouting(target) = source {
-            let valid_target = match (turn_context.adaptive_model_routing_state(), target) {
-                (AdaptiveModelRoutingState::Pending, AdaptiveModelRoutingState::Simple)
-                | (AdaptiveModelRoutingState::Pending, AdaptiveModelRoutingState::Regular)
-                | (AdaptiveModelRoutingState::Simple, AdaptiveModelRoutingState::Escalated) => true,
-                _ => false,
-            };
+            let valid_target = matches!(
+                (turn_context.adaptive_model_routing_state(), target),
+                (
+                    AdaptiveModelRoutingState::Pending,
+                    AdaptiveModelRoutingState::Simple
+                ) | (
+                    AdaptiveModelRoutingState::Pending,
+                    AdaptiveModelRoutingState::Regular
+                ) | (
+                    AdaptiveModelRoutingState::Simple,
+                    AdaptiveModelRoutingState::Escalated
+                )
+            );
             if !valid_target {
                 return TurnSettingsUpdateOutcome::Rejected {
                     reason: "adaptive model routing state changed before the model switch"
@@ -408,6 +422,7 @@ impl Session {
                     &current.settings,
                     &destination,
                     &state.session_configuration.original_config_do_not_use,
+                    source,
                 )
             })
         {

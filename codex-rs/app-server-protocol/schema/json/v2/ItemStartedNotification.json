@@ -11,6 +11,13 @@
       ],
       "type": "string"
     },
+    "AgentMessageModelTier": {
+      "enum": [
+        "simple",
+        "regular"
+      ],
+      "type": "string"
+    },
     "AsyncUserInputQuestion": {
       "additionalProperties": false,
       "properties": {
@@ -860,6 +867,26 @@
                 }
               ],
               "default": null
+            },
+            "model": {
+              "default": null,
+              "description": "Model that produced this assistant message, when known.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "modelTier": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AgentMessageModelTier"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Adaptive routing tier used for this assistant message, when known."
             },
             "phase": {
               "anyOf": [

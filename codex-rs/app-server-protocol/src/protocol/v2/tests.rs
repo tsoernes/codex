@@ -3146,6 +3146,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
                 text: "world".to_string(),
             },
         ],
+        model: None,
+        model_tier: None,
         phase: None,
         memory_citation: None,
         delivery: None,
@@ -3155,6 +3157,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     assert_eq!(
         ThreadItem::from(agent_item),
         ThreadItem::AgentMessage {
+            model: None,
+            model_tier: None,
             id: "agent-1".to_string(),
             text: "Hello world".to_string(),
             phase: None,
@@ -3169,6 +3173,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
         content: vec![AgentMessageContent::Text {
             text: "final".to_string(),
         }],
+        model: Some("gpt-6-luna".to_string()),
+        model_tier: Some(codex_protocol::items::AgentMessageModelTier::Simple),
         phase: Some(MessagePhase::FinalAnswer),
         memory_citation: Some(CoreMemoryCitation {
             entries: vec![CoreMemoryCitationEntry {
@@ -3188,6 +3194,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
         ThreadItem::AgentMessage {
             id: "agent-2".to_string(),
             text: "final".to_string(),
+            model: Some("gpt-6-luna".to_string()),
+            model_tier: Some(AgentMessageModelTier::Simple),
             phase: Some(MessagePhase::FinalAnswer),
             memory_citation: Some(MemoryCitation {
                 entries: vec![MemoryCitationEntry {
@@ -3208,6 +3216,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
         content: vec![AgentMessageContent::Text {
             text: "Which?".to_string(),
         }],
+        model: None,
+        model_tier: None,
         phase: Some(MessagePhase::FinalAnswer),
         memory_citation: None,
         delivery: Some(AgentMessageDelivery::Async),
@@ -3219,8 +3229,9 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     assert_eq!(
         serde_json::to_value(&async_item).unwrap(),
         json!({
-            "type": "agentMessage", "id": "async-1", "text": "Which?", "phase": "final_answer",
-            "memoryCitation": null, "delivery": "async", "questions": [{"title": "Which?", "options": null}]
+            "type": "agentMessage", "id": "async-1", "text": "Which?", "model": null,
+            "modelTier": null, "phase": "final_answer", "memoryCitation": null,
+            "delivery": "async", "questions": [{"title": "Which?", "options": null}]
         })
     );
     let old_item: ThreadItem = serde_json::from_value(json!({

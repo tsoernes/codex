@@ -229,6 +229,8 @@ async fn split_homes_support_backfill_listing_and_paginated_history() {
                         content: vec![AgentMessageContent::Text {
                             text: "done".to_string(),
                         }],
+                        model: None,
+                        model_tier: None,
                         phase: None,
                         memory_citation: None,
                         delivery: None,
@@ -323,6 +325,8 @@ async fn paginated_live_append_materializes_turn_items_and_state() {
                         content: vec![AgentMessageContent::Text {
                             text: "done".to_string(),
                         }],
+                        model: None,
+                        model_tier: None,
                         phase: None,
                         memory_citation: None,
                         delivery: None,
@@ -479,6 +483,8 @@ async fn paginated_realtime_items_materialize_separately_in_rollout_order() {
                         content: vec![AgentMessageContent::Text {
                             text: "Result".to_string(),
                         }],
+                        model: None,
+                        model_tier: None,
                         phase: None,
                         memory_citation: None,
                         delivery: None,
@@ -2666,6 +2672,8 @@ fn agent_message(id: &str, phase: MessagePhase) -> TurnItem {
         content: vec![AgentMessageContent::Text {
             text: id.to_string(),
         }],
+        model: None,
+        model_tier: None,
         phase: Some(phase),
         memory_citation: None,
         delivery: None,

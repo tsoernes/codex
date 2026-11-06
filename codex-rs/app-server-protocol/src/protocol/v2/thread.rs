@@ -32,6 +32,7 @@ pub use codex_protocol::dynamic_tools::DynamicToolNamespaceTool;
 pub use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::protocol::ModelRoutingUsage as CoreModelRoutingUsage;
 use codex_protocol::protocol::ThreadGoalStatus as CoreThreadGoalStatus;
 use codex_protocol::protocol::TokenUsage as CoreTokenUsage;
 use codex_protocol::protocol::TokenUsageInfo as CoreTokenUsageInfo;
@@ -1889,6 +1890,8 @@ impl From<codex_protocol::ResponseUsageMetadata> for ResponseUsageMetadata {
 pub struct ThreadTokenUsage {
     pub total: TokenUsageBreakdown,
     pub last: TokenUsageBreakdown,
+    #[serde(default)]
+    pub model_routing_usage: Option<ThreadModelRoutingUsage>,
     // TODO(aibrahim): make this not optional
     #[ts(type = "number | null")]
     pub model_context_window: Option<i64>,
@@ -1899,7 +1902,33 @@ impl From<CoreTokenUsageInfo> for ThreadTokenUsage {
         Self {
             total: value.total_token_usage.into(),
             last: value.last_token_usage.into(),
+            model_routing_usage: value.model_routing_usage.map(Into::into),
             model_context_window: value.model_context_window,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadModelRoutingUsage {
+    pub simple_model_slug: String,
+    pub simple_model: TokenUsageBreakdown,
+    pub reported_total: TokenUsageBreakdown,
+    pub simple_model_responses: i64,
+    pub total_responses: i64,
+    pub unreported_responses: i64,
+}
+
+impl From<CoreModelRoutingUsage> for ThreadModelRoutingUsage {
+    fn from(value: CoreModelRoutingUsage) -> Self {
+        Self {
+            simple_model_slug: value.simple_model_slug,
+            simple_model: value.simple_model_token_usage.into(),
+            reported_total: value.reported_total_token_usage.into(),
+            simple_model_responses: value.simple_model_responses,
+            total_responses: value.total_responses,
+            unreported_responses: value.unreported_responses,
         }
     }
 }

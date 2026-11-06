@@ -2042,6 +2042,8 @@ async fn external_agent_config_import_creates_session_rollouts() -> Result<()> {
     assert_eq!(
         imported_items.last(),
         Some(&ThreadItem::AgentMessage {
+            model: None,
+            model_tier: None,
             id: "item-4".into(),
             text: "<EXTERNAL SESSION IMPORTED>".into(),
             phase: None,

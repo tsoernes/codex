@@ -1,0 +1,24 @@
+---
+source: tui/src/status/tests.rs
+assertion_line: 2296
+expression: "sanitized.join(\"\\n\")"
+---
+/status
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│  >_ OpenAI Codex (v0.0.0)                                                    │
+│                                                                              │
+│ Visit https://chatgpt.com/codex/settings/usage for up-to-date                │
+│ information on rate limits and credits                                       │
+│                                                                              │
+│  Model:                gpt-6-astra (reasoning none, summaries auto)          │
+│  Directory: [[workspace]]                                                    │
+│  Permissions:          Custom (workspace with network access, Ask for approv │
+│  Agents.md:            <none>                                                │
+│                                                                              │
+│  Token usage:          700 total  (600 input + 100 output)                   │
+│  Simple model usage:   simple_model=local-small-model · input 80 (20 cached, │
+│                        5 cache write) · output 20 · input share 13% · output │
+│                        share 20% · 1 responses                               │
+│  Limits:               data not available yet                                │
+╰──────────────────────────────────────────────────────────────────────────────╯

@@ -63,6 +63,8 @@ async fn turn_timing_state_records_ttfm_independently_of_ttft() {
             .record_ttfm_for_turn_item(&TurnItem::AgentMessage(AgentMessageItem {
                 id: "msg-1".to_string(),
                 content: Vec::new(),
+                model: None,
+                model_tier: None,
                 phase: None,
                 memory_citation: None,
                 delivery: None,
@@ -76,6 +78,8 @@ async fn turn_timing_state_records_ttfm_independently_of_ttft() {
             .record_ttfm_for_turn_item(&TurnItem::AgentMessage(AgentMessageItem {
                 id: "msg-2".to_string(),
                 content: Vec::new(),
+                model: None,
+                model_tier: None,
                 phase: None,
                 memory_citation: None,
                 delivery: None,

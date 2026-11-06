@@ -35,7 +35,8 @@ impl ChatWidget {
             .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, /*nsecs*/ 0))
             .map(|timestamp| timestamp.with_timezone(&Local))
             .or_else(|| replay_kind.is_none().then(Local::now));
-        if completed_at.is_none() && elapsed_seconds.is_none() {
+        let model_label = self.transcript.last_completed_agent_model_label.clone();
+        if completed_at.is_none() && elapsed_seconds.is_none() && model_label.is_none() {
             return None;
         }
         self.turn_lifecycle
@@ -45,10 +46,14 @@ impl ChatWidget {
             elapsed_seconds,
             /*runtime_metrics*/ None,
         );
-        Some(match completed_at {
+        let cell = match completed_at {
             Some(completed_at) => {
                 cell.with_completed_at(completed_at, crate::clock_format::ClockFormat::system())
             }
+            None => cell,
+        };
+        Some(match model_label {
+            Some(model_label) => cell.with_model_label(model_label),
             None => cell,
         })
     }

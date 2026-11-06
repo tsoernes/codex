@@ -130,6 +130,74 @@ async fn subagent_completion_preserves_stream_and_authoritative_answer() {
 }
 
 #[tokio::test]
+async fn completed_assistant_messages_route_model_metadata_to_footer() {
+    let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    handle_turn_started(&mut chat, "turn-1");
+    chat.handle_thread_item(
+        AppServerThreadItem::AgentMessage {
+            id: "simple-message".to_string(),
+            text: "Simple-tier answer.".to_string(),
+            model: Some("gpt-6-luna".to_string()),
+            model_tier: Some(codex_protocol::items::AgentMessageModelTier::Simple),
+            phase: Some(codex_protocol::models::MessagePhase::FinalAnswer),
+            memory_citation: None,
+            delivery: None,
+            questions: None,
+        },
+        "turn-1".to_string(),
+        ThreadItemRenderSource::Live,
+    );
+    assert_eq!(
+        chat.transcript.last_completed_agent_model_label.as_deref(),
+        Some("simple_model=gpt-6-luna")
+    );
+    chat.handle_thread_item(
+        AppServerThreadItem::AgentMessage {
+            id: "regular-message".to_string(),
+            text: "Regular-tier answer.".to_string(),
+            model: Some("gpt-6.1-sol".to_string()),
+            model_tier: Some(codex_protocol::items::AgentMessageModelTier::Regular),
+            phase: Some(codex_protocol::models::MessagePhase::FinalAnswer),
+            memory_citation: None,
+            delivery: None,
+            questions: None,
+        },
+        "turn-1".to_string(),
+        ThreadItemRenderSource::Live,
+    );
+    chat.run_commit_tick();
+
+    assert_eq!(
+        chat.transcript.last_completed_agent_model_label.as_deref(),
+        Some("model=gpt-6.1-sol")
+    );
+    let (_, rendered) = drain_finalized_transcript(&mut rx);
+    assert!(rendered.contains("Simple-tier answer."));
+    assert!(rendered.contains("Regular-tier answer."));
+    assert!(!rendered.contains("simple_model="));
+    assert!(!rendered.contains("model=gpt-6.1-sol"));
+
+    let turn = codex_app_server_protocol::Turn {
+        id: "turn-1".to_string(),
+        items: Vec::new(),
+        items_view: Default::default(),
+        status: codex_app_server_protocol::TurnStatus::Completed,
+        error: None,
+        started_at: None,
+        completed_at: Some(0),
+        duration_ms: Some(125_000),
+    };
+    let footer = chat
+        .completion_cell(&turn, /*replay_kind*/ None)
+        .expect("turn completion metadata");
+    assert!(
+        footer.raw_lines()[0]
+            .to_string()
+            .ends_with(" · model=gpt-6.1-sol")
+    );
+}
+
+#[tokio::test]
 async fn interrupted_answer_flushes_queued_subagent_activity() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
     handle_turn_started(&mut chat, "turn-1");

@@ -34,6 +34,7 @@ use crate::dynamic_tools::DynamicToolResponse;
 use crate::dynamic_tools::DynamicToolSpec;
 use crate::error::Result as CodexResult;
 use crate::items::AgentMessageDelivery;
+use crate::items::AgentMessageModelTier;
 use crate::items::AsyncUserInputQuestion;
 use crate::items::TurnItem;
 use crate::mcp::CallToolResult;
@@ -2273,6 +2274,22 @@ pub struct TokenUsageInfo {
     // TODO(aibrahim): make this not optional
     #[ts(type = "number | null")]
     pub model_context_window: Option<i64>,
+    /// Provider-reported usage attributed to adaptive model routing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model_routing_usage: Option<ModelRoutingUsage>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct ModelRoutingUsage {
+    pub simple_model_slug: String,
+    pub simple_model_token_usage: TokenUsage,
+    /// Usage reported by providers for all model responses in the routed session.
+    pub reported_total_token_usage: TokenUsage,
+    pub simple_model_responses: i64,
+    pub total_responses: i64,
+    /// Number of responses for which the provider omitted token usage.
+    pub unreported_responses: i64,
 }
 
 impl TokenUsageInfo {
@@ -2291,6 +2308,7 @@ impl TokenUsageInfo {
                 total_token_usage: TokenUsage::default(),
                 last_token_usage: TokenUsage::default(),
                 model_context_window,
+                model_routing_usage: None,
             },
         };
         if let Some(last) = last {
@@ -2327,6 +2345,7 @@ impl TokenUsageInfo {
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
             model_context_window: Some(context_window),
+            model_routing_usage: None,
         };
         info.fill_to_context_window(context_window);
         info
@@ -2514,6 +2533,14 @@ pub struct AgentMessageEvent {
     pub message: String,
     #[serde(default)]
     pub phase: Option<MessagePhase>,
+    /// Model that produced this assistant message, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model: Option<String>,
+    /// Adaptive routing tier used for this assistant message, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model_tier: Option<AgentMessageModelTier>,
     #[serde(default)]
     pub memory_citation: Option<MemoryCitation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -6394,6 +6421,7 @@ mod tests {
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
             model_context_window: Some(258_400),
+            model_routing_usage: None,
         });
         let last = Some(TokenUsage {
             input_tokens: 10,
@@ -6417,6 +6445,7 @@ mod tests {
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
             model_context_window: Some(258_400),
+            model_routing_usage: None,
         });
         let last = Some(TokenUsage {
             input_tokens: 10,

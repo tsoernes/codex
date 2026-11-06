@@ -244,6 +244,8 @@ async fn inactive_thread_user_verification_preserves_foreground_stream() -> Resu
             turn_id: "turn-foreground".to_string(),
             completed_at_ms: 0,
             item: ThreadItem::AgentMessage {
+                model: None,
+                model_tier: None,
                 id: "message-foreground".to_string(),
                 text: "The foreground answer continues.".to_string(),
                 phase: None,

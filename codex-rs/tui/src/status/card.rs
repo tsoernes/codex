@@ -69,6 +69,20 @@ pub(crate) struct StatusTokenUsageData {
     input: i64,
     output: i64,
     context_window: Option<StatusContextWindowData>,
+    model_routing_usage: Option<StatusModelRoutingUsage>,
+}
+
+#[derive(Debug, Clone)]
+struct StatusModelRoutingUsage {
+    model_slug: String,
+    input_tokens: i64,
+    cached_input_tokens: i64,
+    cache_write_input_tokens: i64,
+    output_tokens: i64,
+    input_share_percent: Option<i64>,
+    output_share_percent: Option<i64>,
+    simple_responses: i64,
+    unreported_responses: i64,
 }
 
 #[derive(Debug)]
@@ -371,6 +385,37 @@ impl StatusHistoryCell {
             input: total_usage.non_cached_input(),
             output: total_usage.output_tokens,
             context_window,
+            model_routing_usage: token_info.and_then(|info| {
+                info.model_routing_usage.as_ref().map(|routing_usage| {
+                    let input_share_percent = (routing_usage.unreported_responses == 0
+                        && routing_usage.reported_total_input_tokens > 0)
+                        .then(|| {
+                            ((routing_usage.simple_input_tokens as f64
+                                / routing_usage.reported_total_input_tokens as f64)
+                                * 100.0)
+                                .round() as i64
+                        });
+                    let output_share_percent = (routing_usage.unreported_responses == 0
+                        && routing_usage.reported_total_output_tokens > 0)
+                        .then(|| {
+                            ((routing_usage.simple_output_tokens as f64
+                                / routing_usage.reported_total_output_tokens as f64)
+                                * 100.0)
+                                .round() as i64
+                        });
+                    StatusModelRoutingUsage {
+                        model_slug: routing_usage.simple_model_slug.clone(),
+                        input_tokens: routing_usage.simple_input_tokens,
+                        cached_input_tokens: routing_usage.simple_cached_input_tokens,
+                        cache_write_input_tokens: routing_usage.simple_cache_write_input_tokens,
+                        output_tokens: routing_usage.simple_output_tokens,
+                        input_share_percent,
+                        output_share_percent,
+                        simple_responses: routing_usage.simple_model_responses,
+                        unreported_responses: routing_usage.unreported_responses,
+                    }
+                })
+            }),
         };
         let rate_limits = if rate_limits.len() <= 1 {
             compose_rate_limit_data(rate_limits.first(), now)
@@ -420,6 +465,54 @@ impl StatusHistoryCell {
             Span::from(" output").dim(),
             Span::from(")").dim(),
         ]
+    }
+
+    fn model_routing_usage_spans(&self) -> Option<Vec<Span<'static>>> {
+        let usage = self.token_usage.model_routing_usage.as_ref()?;
+        let mut spans = vec![
+            Span::from(format!("simple_model={}", usage.model_slug)),
+            Span::from(" · ").dim(),
+            Span::from(format!(
+                "input {} ({} cached, {} cache write)",
+                format_tokens_compact(usage.input_tokens),
+                format_tokens_compact(usage.cached_input_tokens),
+                format_tokens_compact(usage.cache_write_input_tokens)
+            )),
+            Span::from(" · ").dim(),
+            Span::from(format!(
+                "output {}",
+                format_tokens_compact(usage.output_tokens)
+            )),
+        ];
+        if usage.unreported_responses == 0 {
+            let input_share = usage
+                .input_share_percent
+                .map_or_else(|| "n/a".to_string(), |share| format!("{share}%"));
+            let output_share = usage
+                .output_share_percent
+                .map_or_else(|| "n/a".to_string(), |share| format!("{share}%"));
+            spans.push(
+                Span::from(format!(
+                    " · input share {input_share} · output share {output_share}"
+                ))
+                .dim(),
+            );
+        } else {
+            let missing = if usage.unreported_responses == 1 {
+                "response omitted token usage"
+            } else {
+                "responses omitted token usage"
+            };
+            spans.push(
+                Span::from(format!(
+                    " · input/output shares unavailable ({missing}: {})",
+                    usage.unreported_responses
+                ))
+                .dim(),
+            );
+        }
+        spans.push(Span::from(format!(" · {} responses", usage.simple_responses)).dim());
+        Some(spans)
     }
 
     fn context_window_spans(&self) -> Option<Vec<Span<'static>>> {
@@ -795,6 +888,9 @@ impl StatusHistoryCell {
             push_label(&mut labels, &mut seen, "Collaboration mode");
         }
         push_label(&mut labels, &mut seen, "Token usage");
+        if self.token_usage.model_routing_usage.is_some() {
+            push_label(&mut labels, &mut seen, "Simple model usage");
+        }
         if self.token_usage.context_window.is_some() {
             push_label(&mut labels, &mut seen, "Context window");
         }
@@ -883,6 +979,14 @@ impl StatusHistoryCell {
         // Hide token usage only for ChatGPT subscribers
         if !matches!(self.account, Some(StatusAccountDisplay::ChatGpt { .. })) {
             lines.push(formatter.line("Token usage", self.token_usage_spans()));
+        }
+        if let Some(spans) = self.model_routing_usage_spans() {
+            let wrapped = word_wrap_lines([Line::from(spans)], RtOptions::new(value_width.max(1)));
+            let mut wrapped = wrapped.into_iter();
+            if let Some(line) = wrapped.next() {
+                lines.push(formatter.line("Simple model usage", line.spans));
+            }
+            lines.extend(wrapped.map(|line| formatter.continuation(line.spans)));
         }
 
         if let Some(spans) = self.context_window_spans() {

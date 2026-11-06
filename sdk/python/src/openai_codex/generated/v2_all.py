@@ -152,6 +152,11 @@ class AgentMessageInputContent(
     root: InputTextAgentMessageInputContent | EncryptedContentAgentMessageInputContent
 
 
+class AgentMessageModelTier(Enum):
+    simple = "simple"
+    regular = "regular"
+
+
 class AgentPath(RootModel[str]):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9629,6 +9634,16 @@ class AgentMessageThreadItem(BaseModel):
     delivery: AgentMessageDelivery | None = None
     id: str
     memory_citation: Annotated[MemoryCitation | None, Field(alias="memoryCitation")] = None
+    model: Annotated[
+        str | None, Field(description="Model that produced this assistant message, when known.")
+    ] = None
+    model_tier: Annotated[
+        AgentMessageModelTier | None,
+        Field(
+            alias="modelTier",
+            description="Adaptive routing tier used for this assistant message, when known.",
+        ),
+    ] = None
     phase: MessagePhase | None = None
     questions: list[AsyncUserInputQuestion] | None = None
     text: str
@@ -9840,6 +9855,18 @@ class ThreadListParams(BaseModel):
             description="If true, return from the state DB without scanning JSONL rollouts to repair thread metadata. Omitted or false preserves scan-and-repair behavior.",
         ),
     ] = None
+
+
+class ThreadModelRoutingUsage(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    reported_total: Annotated[TokenUsageBreakdown, Field(alias="reportedTotal")]
+    simple_model: Annotated[TokenUsageBreakdown, Field(alias="simpleModel")]
+    simple_model_responses: Annotated[int, Field(alias="simpleModelResponses")]
+    simple_model_slug: Annotated[str, Field(alias="simpleModelSlug")]
+    total_responses: Annotated[int, Field(alias="totalResponses")]
+    unreported_responses: Annotated[int, Field(alias="unreportedResponses")]
 
 
 class TranscriptSegmentThreadRealtimeItem(BaseModel):
@@ -10064,6 +10091,9 @@ class ThreadTokenUsage(BaseModel):
     )
     last: TokenUsageBreakdown
     model_context_window: Annotated[int | None, Field(alias="modelContextWindow")] = None
+    model_routing_usage: Annotated[
+        ThreadModelRoutingUsage | None, Field(alias="modelRoutingUsage")
+    ] = None
     total: TokenUsageBreakdown
 
 

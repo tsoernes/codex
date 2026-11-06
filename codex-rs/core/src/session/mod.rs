@@ -4603,8 +4603,9 @@ impl Session {
         settings: &ResolvedStepSettings,
         token_usage: Option<&TokenUsage>,
     ) -> CodexResult<()> {
-        if let Some(token_usage) = token_usage {
-            let token_info = {
+        let mut token_info = None;
+        let budget_result = if let Some(token_usage) = token_usage {
+            token_info = {
                 let mut state = self.state.lock().await;
                 state
                     .update_token_info_from_usage(token_usage, turn_context.model_context_window());
@@ -4627,21 +4628,34 @@ impl Session {
                     token_usage,
                 );
             }
-            let budget_result = self.record_rollout_budget_usage(token_usage);
-            if let Some(token_info) = token_info.as_ref() {
-                for contributor in self.services.extensions.token_usage_contributors() {
-                    contributor
-                        .on_token_usage(
-                            &self.services.session_extension_data,
-                            &self.services.thread_extension_data,
-                            turn_context.extension_data.as_ref(),
-                            token_info,
-                        )
-                        .await;
-                }
-            }
-            budget_result?;
+            self.record_rollout_budget_usage(token_usage)
+        } else {
+            Ok(())
+        };
+
+        if turn_context.config.agent_model_routing_scope.is_some() {
+            let mut state = self.state.lock().await;
+            state.record_model_routing_usage(
+                &turn_context.config.agent_simple_model,
+                &settings.model_info.slug,
+                token_usage,
+            );
+            token_info = state.token_info();
         }
+
+        if let Some(token_info) = token_info.as_ref() {
+            for contributor in self.services.extensions.token_usage_contributors() {
+                contributor
+                    .on_token_usage(
+                        &self.services.session_extension_data,
+                        &self.services.thread_extension_data,
+                        turn_context.extension_data.as_ref(),
+                        token_info,
+                    )
+                    .await;
+            }
+        }
+        budget_result?;
         Ok(())
     }
 
@@ -4659,6 +4673,7 @@ impl Session {
                 total_token_usage: TokenUsage::default(),
                 last_token_usage: TokenUsage::default(),
                 model_context_window: None,
+                model_routing_usage: None,
             });
 
             info.last_token_usage = TokenUsage {

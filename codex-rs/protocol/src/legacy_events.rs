@@ -129,6 +129,8 @@ impl AgentMessageItem {
                 AgentMessageContent::Text { text } => EventMsg::AgentMessage(AgentMessageEvent {
                     message: text.clone(),
                     phase: self.phase.clone(),
+                    model: self.model.clone(),
+                    model_tier: self.model_tier,
                     memory_citation: self.memory_citation.clone(),
                     delivery: self.delivery,
                     questions: self.questions.clone(),

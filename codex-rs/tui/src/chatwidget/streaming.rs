@@ -417,13 +417,26 @@ impl ChatWidget {
             self.add_async_questions(&item.id, questions);
         }
         self.transcript.last_completed_agent_message = Some((turn_id.to_string(), item.id.clone()));
+        self.transcript.last_completed_agent_model_label = item.model.as_deref().map(|model| {
+            let model = model
+                .chars()
+                .filter(|character| !character.is_control())
+                .take(128)
+                .collect::<String>();
+            let tier = match item.model_tier {
+                Some(codex_protocol::items::AgentMessageModelTier::Simple) => "simple_model",
+                Some(codex_protocol::items::AgentMessageModelTier::Regular) | None => "model",
+            };
+            format!("{tier}={model}")
+        });
         let mut message = String::new();
         for content in &item.content {
             match content {
                 AgentMessageContent::Text { text } => message.push_str(text),
             }
         }
-        let parsed = parse_assistant_markdown(&message, self.config.cwd.as_path());
+        let display_message = message;
+        let parsed = parse_assistant_markdown(&display_message, self.config.cwd.as_path());
         if from_replay && self.stream_controller.is_none() && !parsed.visible_markdown.is_empty() {
             self.prepare_assistant_message();
             self.mark_safety_buffering_agent_message_started();
@@ -448,7 +461,7 @@ impl ChatWidget {
         }
         if !parsed.visible_markdown.is_empty() {
             self.transcript
-                .record_agent_markdown(parsed.visible_markdown.clone(), message);
+                .record_agent_markdown(parsed.visible_markdown.clone(), display_message);
         }
         if !from_replay
             && let Some(cwd) = parsed.last_created_branch_cwd()

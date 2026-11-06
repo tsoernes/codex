@@ -12,6 +12,7 @@ use crate::compact::run_inline_auto_compact_task;
 use crate::compact_remote_v2::run_inline_remote_auto_compact_task as run_inline_remote_auto_compact_task_v2;
 use crate::connectors;
 use crate::context::ContextualUserFragment;
+use crate::context::ModelRoutingPreflightInstructions;
 use crate::context::UserVerificationNotice;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::feedback_tags;
@@ -50,9 +51,11 @@ use crate::stream_events_utils::last_assistant_message_from_item;
 use crate::stream_events_utils::mark_thread_memory_mode_polluted_if_external_context;
 use crate::stream_events_utils::raw_assistant_output_text_from_item;
 use crate::stream_events_utils::record_completed_response_item_with_finalized_facts;
+use crate::stream_events_utils::set_agent_message_model_metadata;
 use crate::tasks::emit_compact_metric;
 use crate::tools::ToolRouter;
 use crate::tools::context::SharedTurnDiffTracker;
+use crate::tools::handlers::model_routing::is_route_model_call;
 use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::router::ToolSuggestCandidates;
@@ -1561,12 +1564,24 @@ pub(crate) fn build_prompt(
     base_instructions: BaseInstructions,
 ) -> Prompt {
     let turn_context = &step_context.turn;
+    let routing_preflight_pending = turn_context.adaptive_model_routing_state()
+        == crate::session::turn_context::AdaptiveModelRoutingState::Pending;
+    let mut base_instructions = base_instructions;
+    if routing_preflight_pending {
+        base_instructions.text.push_str("\n\n");
+        let instructions = ModelRoutingPreflightInstructions;
+        let (start_marker, end_marker) = instructions.markers();
+        base_instructions.text.push_str(start_marker);
+        base_instructions.text.push('\n');
+        base_instructions.text.push_str(&instructions.body());
+        base_instructions.text.push('\n');
+        base_instructions.text.push_str(end_marker);
+    }
     Prompt {
         input,
         tools: step_context.tool_router.model_visible_specs(),
         parallel_tool_calls: true,
-        tool_choice_required: turn_context.adaptive_model_routing_state()
-            == crate::session::turn_context::AdaptiveModelRoutingState::Pending,
+        tool_choice_required: routing_preflight_pending,
         base_instructions,
         output_schema: turn_context.final_output_json_schema.clone(),
         output_schema_strict: !crate::guardian::is_basic_session_source(
@@ -2302,6 +2317,8 @@ async fn emit_agent_message_in_plan_mode(
                 TurnItem::AgentMessage(codex_protocol::items::AgentMessageItem {
                     id: agent_message_id.clone(),
                     content: Vec::new(),
+                    model: None,
+                    model_tier: None,
                     phase: None,
                     memory_citation: None,
                     delivery: None,
@@ -2357,7 +2374,7 @@ async fn handle_assistant_item_done_in_plan_mode(
         maybe_complete_plan_item_from_message(sess, turn_context, state, item).await;
 
         let mut finalized_facts = None;
-        if let Some(finalized_turn_item) = finalize_non_tool_response_item(
+        if let Some(mut finalized_turn_item) = finalize_non_tool_response_item(
             sess,
             TurnItemContributorPolicy::Run(turn_store),
             item,
@@ -2365,6 +2382,15 @@ async fn handle_assistant_item_done_in_plan_mode(
         )
         .await
         {
+            set_agent_message_model_metadata(
+                &mut finalized_turn_item.turn_item,
+                &step_context.settings.model_info,
+                turn_context
+                    .config
+                    .agent_model_routing_scope
+                    .is_some()
+                    .then_some(turn_context.config.agent_simple_model.as_str()),
+            );
             finalized_facts = Some(finalized_turn_item.facts.clone());
             emit_turn_item_in_plan_mode(
                 sess,
@@ -2625,6 +2651,12 @@ async fn try_run_sampling_request(
                     )
                     .await;
                 }
+                if turn_context.adaptive_model_routing_state()
+                    == crate::session::turn_context::AdaptiveModelRoutingState::Pending
+                    && !is_route_model_call(&item)
+                {
+                    continue;
+                }
                 if let Some(state) = plan_mode_state.as_mut()
                     && handle_assistant_item_done_in_plan_mode(
                         &sess,
@@ -2719,7 +2751,18 @@ async fn try_run_sampling_request(
                 .await
                 {
                     let mut turn_item = turn_item;
-                    let stream_item_to_client = !defer_streamed_turn_items_for_contributors;
+                    set_agent_message_model_metadata(
+                        &mut turn_item,
+                        &step_context.settings.model_info,
+                        turn_context
+                            .config
+                            .agent_model_routing_scope
+                            .is_some()
+                            .then_some(turn_context.config.agent_simple_model.as_str()),
+                    );
+                    let stream_item_to_client = !defer_streamed_turn_items_for_contributors
+                        && turn_context.adaptive_model_routing_state()
+                            != crate::session::turn_context::AdaptiveModelRoutingState::Pending;
                     let mut seeded_parsed: Option<ParsedAssistantTextDelta> = None;
                     let mut seeded_item_id: Option<String> = None;
                     if stream_item_to_client
@@ -3043,6 +3086,36 @@ async fn try_run_sampling_request(
     };
     drain_in_flight(&mut in_flight, sess.clone(), &step_context).await?;
     drop(tool_blocking_timing_guard);
+
+    let mut outcome = outcome;
+    if outcome.is_ok()
+        && turn_context.adaptive_model_routing_state()
+            == crate::session::turn_context::AdaptiveModelRoutingState::Pending
+    {
+        warn!(
+            turn_id = %turn_context.sub_id,
+            "model-routing preflight completed without selecting a model; retrying with the regular model"
+        );
+        match sess
+            .apply_adaptive_model_route(
+                &turn_context.sub_id,
+                crate::session::turn_context::AdaptiveModelRoutingState::Regular,
+            )
+            .await
+        {
+            codex_protocol::protocol::TurnSettingsUpdateOutcome::Applied => {
+                if let Ok(result) = &mut outcome {
+                    result.needs_follow_up = true;
+                }
+            }
+            codex_protocol::protocol::TurnSettingsUpdateOutcome::Rejected { reason } => {
+                return Err(CodexErr::InvalidRequest(reason));
+            }
+            codex_protocol::protocol::TurnSettingsUpdateOutcome::TargetUnavailable => {
+                return Err(CodexErr::TurnAborted);
+            }
+        }
+    }
 
     if should_emit_token_count {
         // A tool call such as request_user_input can intentionally pause the turn. Emit token

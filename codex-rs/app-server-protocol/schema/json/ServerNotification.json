@@ -177,6 +177,13 @@
       ],
       "type": "object"
     },
+    "AgentMessageModelTier": {
+      "enum": [
+        "simple",
+        "regular"
+      ],
+      "type": "string"
+    },
     "AgentPath": {
       "type": "string"
     },
@@ -4642,6 +4649,26 @@
               ],
               "default": null
             },
+            "model": {
+              "default": null,
+              "description": "Model that produced this assistant message, when known.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "modelTier": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AgentMessageModelTier"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Adaptive routing tier used for this assistant message, when known."
+            },
             "phase": {
               "anyOf": [
                 {
@@ -5410,6 +5437,40 @@
         }
       ]
     },
+    "ThreadModelRoutingUsage": {
+      "properties": {
+        "reportedTotal": {
+          "$ref": "#/definitions/TokenUsageBreakdown"
+        },
+        "simpleModel": {
+          "$ref": "#/definitions/TokenUsageBreakdown"
+        },
+        "simpleModelResponses": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "simpleModelSlug": {
+          "type": "string"
+        },
+        "totalResponses": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "unreportedResponses": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "reportedTotal",
+        "simpleModel",
+        "simpleModelResponses",
+        "simpleModelSlug",
+        "totalResponses",
+        "unreportedResponses"
+      ],
+      "type": "object"
+    },
     "ThreadNameUpdatedNotification": {
       "properties": {
         "threadId": {
@@ -6148,6 +6209,17 @@
             "integer",
             "null"
           ]
+        },
+        "modelRoutingUsage": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadModelRoutingUsage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "total": {
           "$ref": "#/definitions/TokenUsageBreakdown"

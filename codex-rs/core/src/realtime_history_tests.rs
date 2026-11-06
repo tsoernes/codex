@@ -222,6 +222,8 @@ fn promotes_backing_agent_artifacts_once_without_a_client_request() {
         content: vec![AgentMessageContent::Text {
             text: "[analysis] ::codex-realtime-inline{}\nVisible explanation".to_string(),
         }],
+        model: None,
+        model_tier: None,
         phase: None,
         memory_citation: None,
         delivery: None,
@@ -299,6 +301,8 @@ fn promotes_distinct_visualizations_once_and_ignores_markdown_fences() {
         content: vec![AgentMessageContent::Text {
             text: text.to_string(),
         }],
+        model: None,
+        model_tier: None,
         phase: None,
         memory_citation: None,
         delivery: None,

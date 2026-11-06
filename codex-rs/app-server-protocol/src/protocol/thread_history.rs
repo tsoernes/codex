@@ -528,6 +528,8 @@ impl ThreadHistoryBuilder {
         self.push_item_in_current_turn(ThreadItem::AgentMessage {
             id,
             text: payload.message.clone(),
+            model: payload.model.clone(),
+            model_tier: payload.model_tier,
             phase: payload.phase.clone(),
             memory_citation: payload.memory_citation.clone().map(Into::into),
             delivery: payload.delivery,
@@ -1858,6 +1860,8 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: "Hi there".into(),
                 phase: None,
                 memory_citation: None,
@@ -1879,6 +1883,8 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: "Reply two".into(),
                 phase: None,
                 memory_citation: None,
@@ -1920,6 +1926,8 @@ mod tests {
         assert_eq!(
             first.items[1],
             ThreadItem::AgentMessage {
+                model: None,
+                model_tier: None,
                 id: "item-2".into(),
                 text: "Hi there".into(),
                 phase: None,
@@ -1955,6 +1963,8 @@ mod tests {
         assert_eq!(
             second.items[1],
             ThreadItem::AgentMessage {
+                model: None,
+                model_tier: None,
                 id: "item-5".into(),
                 text: "Reply two".into(),
                 phase: None,
@@ -2601,6 +2611,8 @@ mod tests {
             },
         ];
         let events = vec![EventMsg::AgentMessage(AgentMessageEvent {
+            model: None,
+            model_tier: None,
             message: "Final reply".into(),
             phase: Some(CoreMessagePhase::FinalAnswer),
             memory_citation: None,
@@ -2617,6 +2629,8 @@ mod tests {
         assert_eq!(
             turns[0].items[0],
             ThreadItem::AgentMessage {
+                model: None,
+                model_tier: None,
                 id: "item-1".into(),
                 text: "Final reply".into(),
                 phase: Some(CoreMessagePhase::FinalAnswer),
@@ -2731,6 +2745,8 @@ mod tests {
                 text: "first content".into(),
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: "interlude".into(),
                 phase: None,
                 memory_citation: None,
@@ -2781,6 +2797,8 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: "Working...".into(),
                 phase: None,
                 memory_citation: None,
@@ -2803,6 +2821,8 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: "Second attempt complete.".into(),
                 phase: None,
                 memory_citation: None,
@@ -2835,6 +2855,8 @@ mod tests {
         assert_eq!(
             first_turn.items[1],
             ThreadItem::AgentMessage {
+                model: None,
+                model_tier: None,
                 id: "item-2".into(),
                 text: "Working...".into(),
                 phase: None,
@@ -2861,6 +2883,8 @@ mod tests {
         assert_eq!(
             second_turn.items[1],
             ThreadItem::AgentMessage {
+                model: None,
+                model_tier: None,
                 id: "item-4".into(),
                 text: "Second attempt complete.".into(),
                 phase: None,
@@ -2883,6 +2907,8 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: "A1".into(),
                 phase: None,
                 memory_citation: None,
@@ -2898,6 +2924,8 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: "A2".into(),
                 phase: None,
                 memory_citation: None,
@@ -2914,6 +2942,8 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: "A3".into(),
                 phase: None,
                 memory_citation: None,
@@ -2945,6 +2975,8 @@ mod tests {
                     }],
                 },
                 ThreadItem::AgentMessage {
+                    model: None,
+                    model_tier: None,
                     id: "item-2".into(),
                     text: "A1".into(),
                     phase: None,
@@ -2966,6 +2998,8 @@ mod tests {
                     }],
                 },
                 ThreadItem::AgentMessage {
+                    model: None,
+                    model_tier: None,
                     id: "item-4".into(),
                     text: "A3".into(),
                     phase: None,
@@ -2989,6 +3023,8 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: "A1".into(),
                 phase: None,
                 memory_citation: None,
@@ -3004,6 +3040,8 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: "A2".into(),
                 phase: None,
                 memory_citation: None,
@@ -3996,6 +4034,8 @@ mod tests {
         }));
         for message in ["draft", "answer"] {
             builder.handle_event(&EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: message.into(),
                 phase: None,
                 memory_citation: None,
@@ -4283,6 +4323,8 @@ mod tests {
                 time_to_first_token_ms: None,
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: "still in b".into(),
                 phase: None,
                 memory_citation: None,
@@ -4467,6 +4509,8 @@ mod tests {
                 duration_ms: None,
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: "still in b".into(),
                 phase: None,
                 memory_citation: None,
@@ -4737,6 +4781,8 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: "done".into(),
                 phase: None,
                 memory_citation: None,

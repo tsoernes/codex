@@ -151,6 +151,14 @@ pub struct AsyncUserInputQuestion {
 pub struct AgentMessageItem {
     pub id: String,
     pub content: Vec<AgentMessageContent>,
+    /// Model that generated this assistant message, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model: Option<String>,
+    /// Adaptive routing tier used for this response, when routing is enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model_tier: Option<AgentMessageModelTier>,
     /// Optional phase metadata carried through from `ResponseItem::Message`.
     ///
     /// This is currently used by TUI rendering to distinguish mid-turn
@@ -167,6 +175,14 @@ pub struct AgentMessageItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub questions: Option<Vec<AsyncUserInputQuestion>>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum AgentMessageModelTier {
+    Simple,
+    Regular,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]

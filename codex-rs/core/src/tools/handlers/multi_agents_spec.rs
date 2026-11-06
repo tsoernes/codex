@@ -166,7 +166,7 @@ fn append_adaptive_model_routing_guidance(
     };
     let regular_model = regular_model.unwrap_or("the regular/default model");
     let regular_model_guidance = format!(
-        "For model routing, classify each delegated task before spawning: set `model` to the configured simple model only when it can adequately complete the task; otherwise use `{regular_model}` as the regular tier. If a simple-model subagent finishes with `CODEX_SIMPLE_MODEL_ESCALATION: yes`, spawn a second subagent for the same task with `model` set to `{regular_model}`, include the first subagent's response and escalation reason, and wait for the second response. Do not repeat escalation."
+        "For model routing, classify each delegated task before spawning: set `model` to the configured simple model only when it can adequately complete the task; otherwise use `{regular_model}` as the regular tier. Review recent model-routing history notes and later user corrections, retries, or acceptance when evaluating similar tasks; silence alone is not proof of success. If a simple-model subagent finishes with `CODEX_SIMPLE_MODEL_ESCALATION: yes`, spawn a second subagent for the same task with `model` set to `{regular_model}`, include the first subagent's response and escalation reason, and wait for the second response. Do not repeat escalation."
     );
     let description = description.replace(
         "Do not set the `model` field unless the user explicitly asks for a different model.",

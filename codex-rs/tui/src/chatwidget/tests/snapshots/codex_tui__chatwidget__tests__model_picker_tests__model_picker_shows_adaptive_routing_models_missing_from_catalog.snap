@@ -1,0 +1,12 @@
+---
+source: tui/src/chatwidget/tests/model_picker_tests.rs
+assertion_line: 33
+expression: rendered
+---
+  Select Model and Effort
+
+
+› 1. gpt-6.1-sol  Configured regular model for adaptive model routing.
+  2. gpt-6-luna   Configured simpler model for adaptive model routing.
+
+  enter default · s session · esc back

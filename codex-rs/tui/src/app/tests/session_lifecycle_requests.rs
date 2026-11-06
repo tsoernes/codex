@@ -1997,6 +1997,8 @@ async fn older_pagination_reconciles_review_prompts_across_page_boundaries() -> 
             content: vec![AgentMessageContent::Text {
                 text: format!("review output {index}"),
             }],
+            model: None,
+            model_tier: None,
             phase: None,
             memory_citation: None,
             delivery: None,
@@ -2190,6 +2192,8 @@ async fn transcript_alt_beginning_loads_every_older_history_page() -> Result<()>
                 content: vec![AgentMessageContent::Text {
                     text: format!("history output {index}"),
                 }],
+                model: None,
+                model_tier: None,
                 phase: None,
                 memory_citation: None,
                 delivery: None,
@@ -2602,6 +2606,8 @@ async fn underfilled_scrollback_fetches_older_pages_without_opening_the_transcri
                 content: vec![AgentMessageContent::Text {
                     text: format!("scrollback output {index}"),
                 }],
+                model: None,
+                model_tier: None,
                 phase: None,
                 memory_citation: None,
                 delivery: None,
@@ -4616,6 +4622,8 @@ async fn command_center_read_only_open_requests_and_failure_preservation() -> Re
                             content: vec![AgentMessageContent::Text {
                                 text: "Saved final answer".to_string(),
                             }],
+                            model: None,
+                            model_tier: None,
                             phase: Some(codex_protocol::models::MessagePhase::FinalAnswer),
                             memory_citation: None,
                             delivery: None,

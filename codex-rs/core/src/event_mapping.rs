@@ -171,6 +171,8 @@ fn parse_agent_message(
     AgentMessageItem {
         id,
         content,
+        model: None,
+        model_tier: None,
         phase,
         memory_citation: None,
         delivery: None,

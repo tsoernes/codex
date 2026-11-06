@@ -6704,6 +6704,8 @@ session_picker_view = "dense"
                         }],
                     },
                     ThreadItem::AgentMessage {
+                        model: None,
+                        model_tier: None,
                         id: String::from("agent-1"),
                         text: String::from("hello from assistant"),
                         phase: None,

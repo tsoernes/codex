@@ -86,6 +86,8 @@ impl ToolExecutor<ToolInvocation> for SendMessageToUserAsyncHandler {
                 content: vec![AgentMessageContent::Text {
                     text: message.to_string(),
                 }],
+                model: None,
+                model_tier: None,
                 phase: Some(MessagePhase::FinalAnswer),
                 memory_citation: None,
                 delivery: Some(AgentMessageDelivery::Async),

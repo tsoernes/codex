@@ -1037,6 +1037,7 @@ async fn activation_must_match_the_retained_turn_authority(change: ManagedPolicy
             current,
             &destination,
             &live.original_config_do_not_use,
+            TurnSettingsUpdateSource::Client,
         ),
         Ok(())
     );
@@ -1091,6 +1092,7 @@ async fn activation_must_match_the_retained_turn_authority(change: ManagedPolicy
             current,
             &destination,
             &live.original_config_do_not_use,
+            TurnSettingsUpdateSource::Client,
         ),
         Err(match change {
             ManagedPolicyChange::RequireReview => {
@@ -1166,7 +1168,14 @@ async fn model_safety_changes_must_match_the_admitted_authority(
     }
     for current in [&admitted, &destination] {
         assert_eq!(
-            check_legacy_model_safety(&admitted, current, &destination, &turn.config, &turn.config,),
+            check_legacy_model_safety(
+                &admitted,
+                current,
+                &destination,
+                &turn.config,
+                &turn.config,
+                TurnSettingsUpdateSource::Client,
+            ),
             Err(reason.to_string())
         );
     }
@@ -1199,7 +1208,14 @@ async fn model_safety_rejects_fallback_metadata() {
         ),
     ] {
         assert_eq!(
-            check_legacy_model_safety(old, current, next, &turn.config, &turn.config),
+            check_legacy_model_safety(
+                old,
+                current,
+                next,
+                &turn.config,
+                &turn.config,
+                TurnSettingsUpdateSource::Client,
+            ),
             Err(reason.to_string())
         );
     }
@@ -1230,6 +1246,7 @@ async fn parent_fallback_policy_uses_both_config_lifetimes(
             &destination,
             &admitted_config,
             &live_config,
+            TurnSettingsUpdateSource::Client,
         ),
         if allowed {
             Ok(())
@@ -1247,7 +1264,14 @@ async fn parent_fallback_preserves_explicit_empty_and_bundled_defaults() {
     config.guardian_policy_config = None;
     let (admitted, mut destination) = safety_models();
     let check = |destination: &ModelInfo| {
-        check_legacy_model_safety(&admitted, &admitted, destination, &config, &config)
+        check_legacy_model_safety(
+            &admitted,
+            &admitted,
+            destination,
+            &config,
+            &config,
+            TurnSettingsUpdateSource::Client,
+        )
     };
     parent_review_messages(&mut destination).policy = Some(defaults.policy.to_string());
     parent_review_messages(&mut destination).policy_template =
@@ -1291,6 +1315,7 @@ async fn unchanged_explicit_reviewer_does_not_use_parent_policy() {
             &destination,
             &turn.config,
             &turn.config,
+            TurnSettingsUpdateSource::Client,
         ),
         Ok(())
     );
@@ -1360,7 +1385,14 @@ async fn guardian_v2_classification_settings_match_the_admitted_authority(
         destination.auto_review_model_override = reviewer_override;
         for current in [&admitted, &destination] {
             assert_eq!(
-                check_legacy_model_safety(&admitted, current, &destination, &config, &config,),
+                check_legacy_model_safety(
+                    &admitted,
+                    current,
+                    &destination,
+                    &config,
+                    &config,
+                    TurnSettingsUpdateSource::Client,
+                ),
                 Err(
                     "the destination changes the admitted Guardian V2 classification settings"
                         .to_string()
@@ -1411,6 +1443,7 @@ async fn inactive_guardian_v2_does_not_restrict_model_defaults(
             &destination,
             &admitted_config,
             &live_config,
+            TurnSettingsUpdateSource::Client,
         ),
         Ok(())
     );
@@ -1441,7 +1474,14 @@ async fn guardian_v2_empty_model_defaults_are_equivalent() {
             .expect("model messages")
             .guardian_v2 = Some(settings);
         assert_eq!(
-            check_legacy_model_safety(&admitted, &admitted, &destination, &config, &config,),
+            check_legacy_model_safety(
+                &admitted,
+                &admitted,
+                &destination,
+                &config,
+                &config,
+                TurnSettingsUpdateSource::Client,
+            ),
             Ok(())
         );
     }

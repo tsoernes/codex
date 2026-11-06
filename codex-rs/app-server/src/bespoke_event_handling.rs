@@ -3409,6 +3409,8 @@ mod tests {
                                 text: "response".to_string(),
                             },
                         ],
+                        model: None,
+                        model_tier: None,
                         phase: None,
                         memory_citation: None,
                         delivery: None,
@@ -3428,6 +3430,8 @@ mod tests {
                         content: vec![CoreAgentMessageContent::Text {
                             text: "  ".to_string(),
                         }],
+                        model: None,
+                        model_tier: None,
                         phase: None,
                         memory_citation: None,
                         delivery: None,

@@ -1,0 +1,8 @@
+---
+source: tui/src/chatwidget/tests/subagent_activity_tests.rs
+assertion_line: 179
+expression: rendered
+---
+• Simple-tier answer.
+
+• Regular-tier answer.

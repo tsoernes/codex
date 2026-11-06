@@ -4168,6 +4168,8 @@ async fn active_thread_file_change_approval_recovers_buffered_changes() {
             turn_id: "turn-active-approval".to_string(),
             completed_at_ms: 0,
             item: ThreadItem::AgentMessage {
+                model: None,
+                model_tier: None,
                 id: "agent-1".to_string(),
                 text: "streaming".to_string(),
                 phase: None,
@@ -7088,6 +7090,7 @@ fn token_usage_notification(
                 output_tokens: 5,
                 reasoning_output_tokens: 0,
             },
+            model_routing_usage: None,
             model_context_window,
         },
     })
@@ -8551,6 +8554,8 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
                             }],
                         },
                         ThreadItem::AgentMessage {
+                            model: None,
+                            model_tier: None,
                             id: "assistant-2".to_string(),
                             text: "done".to_string(),
                             phase: None,

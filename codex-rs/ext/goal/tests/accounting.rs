@@ -64,6 +64,8 @@ fn empty_continuations_require_three_turns_without_activity_or_goal_changes() {
     let empty_final = TurnItem::AgentMessage(AgentMessageItem {
         id: "empty".into(),
         content: vec![AgentMessageContent::Text { text: " \n".into() }],
+        model: None,
+        model_tier: None,
         phase: Some(MessagePhase::FinalAnswer),
         memory_citation: None,
         delivery: None,

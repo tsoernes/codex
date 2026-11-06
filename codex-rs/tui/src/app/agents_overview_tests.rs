@@ -891,6 +891,8 @@ async fn agents_overview_details_render_markdown() {
             turn_id: "turn".into(),
             completed_at_ms: 0,
             item: ThreadItem::AgentMessage {
+                model: None,
+                model_tier: None,
                 id: "answer".into(),
                 text: message.into(),
                 phase: None,
@@ -992,6 +994,8 @@ async fn agents_overview_reasoning_uses_existing_events_and_expires_with_attachm
             turn_id: "previous-turn".into(),
             completed_at_ms: 0,
             item: ThreadItem::AgentMessage {
+                model: None,
+                model_tier: None,
                 id: "answer".into(),
                 text: "Previous answer".into(),
                 phase: None,

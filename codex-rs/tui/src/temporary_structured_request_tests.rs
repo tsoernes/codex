@@ -24,6 +24,8 @@ use tokio::sync::mpsc::unbounded_channel;
 fn agent_message_notification(turn_id: &str, text: &str) -> ServerNotification {
     ServerNotification::ItemCompleted(ItemCompletedNotification {
         item: ThreadItem::AgentMessage {
+            model: None,
+            model_tier: None,
             id: "message-1".to_string(),
             text: text.to_string(),
             phase: None,

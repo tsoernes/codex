@@ -165,6 +165,18 @@ fn completion_wraps_metadata_and_preserves_unwrapped_raw_text() {
 }
 
 #[test]
+fn completion_shows_model_label_after_timestamp() {
+    let cell = FinalMessageSeparator::new(Some(125), /*runtime_metrics*/ None)
+        .with_completed_at(completed_at(), ClockFormat::TwelveHour)
+        .with_model_label("simple_model=gpt-6-luna".to_string());
+
+    insta::assert_snapshot!(
+        cell.raw_lines()[0].to_string(),
+        @"Worked for 2m 5s · Sep 6, 2000 at 2:32 PM · simple_model=gpt-6-luna"
+    );
+}
+
+#[test]
 fn completion_renders_with_dim_default_colors() {
     let cell: Box<dyn HistoryCell> = Box::new(
         FinalMessageSeparator::new(/*elapsed_seconds*/ None, /*runtime_metrics*/ None)

@@ -1060,6 +1060,46 @@ mod tests {
     }
 
     #[test]
+    fn agent_model_routing_scope_deserializes_alongside_role_tables() {
+        let config: ConfigToml = toml::from_str(
+            r#"[agents]
+model_routing = "all"
+simple_model = "gpt-6-luna"
+
+[agents.researcher]
+description = "Research role."
+"#,
+        )
+        .expect("adaptive routing should deserialize as an agents setting");
+
+        assert_eq!(
+            config.agents,
+            Some(AgentsToml {
+                model_routing: Some(AgentModelRoutingScope::All),
+                simple_model: Some("gpt-6-luna".to_string()),
+                roles: BTreeMap::from([(
+                    "researcher".to_string(),
+                    AgentRoleToml {
+                        description: Some("Research role.".to_string()),
+                        ..Default::default()
+                    },
+                )]),
+                ..Default::default()
+            })
+        );
+
+        let config: ConfigToml = toml::from_str("[agents]\nmodel_routing = \"subagents_only\"")
+            .expect("subagent-only adaptive routing should deserialize");
+        assert_eq!(
+            config
+                .agents
+                .expect("agents should be present")
+                .model_routing,
+            Some(AgentModelRoutingScope::SubagentsOnly)
+        );
+    }
+
+    #[test]
     fn thread_unload_delay_requires_nonnegative_seconds() {
         for value in ["-1", "1.5", "\"60\""] {
             let error =

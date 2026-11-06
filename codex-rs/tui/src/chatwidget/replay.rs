@@ -293,6 +293,8 @@ impl ChatWidget {
             ThreadItem::AgentMessage {
                 id,
                 text,
+                model,
+                model_tier,
                 phase,
                 memory_citation,
                 delivery,
@@ -304,6 +306,8 @@ impl ChatWidget {
                     &ThreadItem::AgentMessage {
                         id: id.clone(),
                         text: text.clone(),
+                        model: model.clone(),
+                        model_tier,
                         phase: phase.clone(),
                         memory_citation: memory_citation.clone(),
                         delivery,
@@ -317,6 +321,8 @@ impl ChatWidget {
                     AgentMessageItem {
                         id,
                         content: vec![AgentMessageContent::Text { text }],
+                        model,
+                        model_tier,
                         phase,
                         memory_citation: memory_citation.map(|citation| {
                             codex_protocol::memory_citation::MemoryCitation {

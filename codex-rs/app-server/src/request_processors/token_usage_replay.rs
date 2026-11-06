@@ -174,6 +174,8 @@ mod tests {
                 ..Default::default()
             })),
             RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
+                model: None,
+                model_tier: None,
                 message: "first answer".to_string(),
                 phase: None,
                 memory_citation: None,

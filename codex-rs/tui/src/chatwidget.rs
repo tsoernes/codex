@@ -75,6 +75,7 @@ use crate::terminal_title::SetTerminalTitleResult;
 use crate::terminal_title::clear_terminal_title;
 use crate::terminal_title::set_terminal_title;
 use crate::text_formatting::proper_join;
+use crate::token_usage::ModelRoutingUsage;
 use crate::token_usage::TokenUsage;
 use crate::token_usage::TokenUsageInfo;
 use crate::version::CODEX_CLI_VERSION;
@@ -982,6 +983,20 @@ fn token_usage_info_from_app_server(token_usage: ThreadTokenUsage) -> TokenUsage
             reasoning_output_tokens: token_usage.last.reasoning_output_tokens,
         },
         model_context_window: token_usage.model_context_window,
+        model_routing_usage: token_usage
+            .model_routing_usage
+            .map(|usage| ModelRoutingUsage {
+                simple_model_slug: usage.simple_model_slug,
+                simple_input_tokens: usage.simple_model.input_tokens,
+                simple_cached_input_tokens: usage.simple_model.cached_input_tokens,
+                simple_cache_write_input_tokens: usage.simple_model.cache_write_input_tokens,
+                simple_output_tokens: usage.simple_model.output_tokens,
+                reported_total_input_tokens: usage.reported_total.input_tokens,
+                reported_total_output_tokens: usage.reported_total.output_tokens,
+                simple_model_responses: usage.simple_model_responses,
+                total_responses: usage.total_responses,
+                unreported_responses: usage.unreported_responses,
+            }),
     }
 }
 

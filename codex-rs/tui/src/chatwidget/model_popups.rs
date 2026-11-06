@@ -231,9 +231,51 @@ impl ChatWidget {
 
     fn open_all_models_popup_with_view_id(
         &mut self,
-        presets: Vec<ModelPreset>,
+        mut presets: Vec<ModelPreset>,
         view_id: &'static str,
     ) {
+        if self.config.agent_model_routing_scope.is_some() {
+            for (model, description) in [
+                (
+                    "gpt-6.1-sol",
+                    "Configured regular model for adaptive model routing.",
+                ),
+                (
+                    "gpt-6-luna",
+                    "Configured simpler model for adaptive model routing.",
+                ),
+            ] {
+                if presets
+                    .iter()
+                    .any(|preset| preset.model.eq_ignore_ascii_case(model))
+                {
+                    continue;
+                }
+
+                presets.push(ModelPreset {
+                    id: model.to_string(),
+                    model: model.to_string(),
+                    display_name: model.to_string(),
+                    description: description.to_string(),
+                    model_specialty: None,
+                    default_reasoning_effort: ReasoningEffortConfig::default(),
+                    supported_reasoning_efforts: Vec::new(),
+                    supports_personality: false,
+                    additional_speed_tiers: Vec::new(),
+                    service_tiers: Vec::new(),
+                    default_service_tier: None,
+                    available_access_programs: None,
+                    is_default: false,
+                    upgrade: None,
+                    show_in_picker: true,
+                    multi_agent_version: None,
+                    availability_nux: None,
+                    supported_in_api: true,
+                    input_modalities: codex_protocol::openai_models::default_input_modalities(),
+                });
+            }
+        }
+
         if presets.is_empty() {
             self.bottom_pane.dismiss_view_by_id(view_id);
             self.add_info_message(

@@ -26,6 +26,7 @@ use codex_protocol::approvals::GuardianAssessmentDecisionSource as CoreGuardianA
 use codex_protocol::approvals::GuardianCommandSource as CoreGuardianCommandSource;
 use codex_protocol::items::AgentMessageContent as CoreAgentMessageContent;
 pub use codex_protocol::items::AgentMessageDelivery;
+pub use codex_protocol::items::AgentMessageModelTier;
 pub use codex_protocol::items::AsyncUserInputQuestion;
 use codex_protocol::items::CollabAgentTool as CoreCollabAgentTool;
 use codex_protocol::items::CollabAgentToolCallStatus as CoreCollabAgentToolCallStatus;
@@ -252,6 +253,12 @@ pub enum ThreadItem {
     AgentMessage {
         id: String,
         text: String,
+        /// Model that produced this assistant message, when known.
+        #[serde(default)]
+        model: Option<String>,
+        /// Adaptive routing tier used for this assistant message, when known.
+        #[serde(default)]
+        model_tier: Option<AgentMessageModelTier>,
         #[serde(default)]
         phase: Option<MessagePhase>,
         #[serde(default)]
@@ -889,6 +896,8 @@ impl From<CoreTurnItem> for ThreadItem {
                 ThreadItem::AgentMessage {
                     id: agent.id,
                     text,
+                    model: agent.model,
+                    model_tier: agent.model_tier,
                     phase: agent.phase,
                     memory_citation: agent.memory_citation.map(Into::into),
                     delivery: agent.delivery,

@@ -187,6 +187,8 @@ async fn delegated_answer_with_async_question_opens_the_editor_instead_of_speech
         user_item("<realtime_delegation><input>choose</input></realtime_delegation>"),
     );
     let answer = ThreadItem::AgentMessage {
+        model: None,
+        model_tier: None,
         id: "question-answer".into(),
         text: "Which option?".into(),
         phase: Some(MessagePhase::FinalAnswer),

@@ -145,6 +145,8 @@ pub(super) fn completed_item(
                 content: vec![AgentMessageContent::Text {
                     text: event.message.clone(),
                 }],
+                model: None,
+                model_tier: None,
                 phase: event.phase.clone(),
                 memory_citation: event.memory_citation.clone(),
                 delivery: event.delivery,

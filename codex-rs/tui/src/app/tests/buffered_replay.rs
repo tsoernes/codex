@@ -23,6 +23,8 @@ fn completed(thread: &str) -> ServerNotification {
         turn_id: "turn".into(),
         completed_at_ms: 0,
         item: ThreadItem::AgentMessage {
+            model: None,
+            model_tier: None,
             id: "answer".into(),
             text: "Final **answer**".into(),
             phase: None,
@@ -246,6 +248,8 @@ fn evicted_voice_delegation_marker_still_suppresses_private_replay() {
         turn_id: "voice-turn".into(),
         completed_at_ms: 0,
         item: ThreadItem::AgentMessage {
+            model: None,
+            model_tier: None,
             id: "reasoning".into(),
             text: "[ANALYSIS] private".into(),
             phase: None,
@@ -370,6 +374,8 @@ fn saved_voice_turn_suppresses_reasoning_without_hiding_typed_reasoning() {
 #[test]
 fn snapshot_keeps_typed_output_before_voice_handoff_in_the_same_turn() {
     let commentary = |id: &str, text: &str| ThreadItem::AgentMessage {
+        model: None,
+        model_tier: None,
         id: id.into(),
         text: text.into(),
         phase: Some(codex_protocol::models::MessagePhase::Commentary),
@@ -427,6 +433,8 @@ fn snapshot_keeps_typed_output_before_voice_handoff_in_the_same_turn() {
 #[test]
 fn snapshot_keeps_typed_item_completed_after_voice_handoff() {
     let typed = ThreadItem::AgentMessage {
+        model: None,
+        model_tier: None,
         id: "typed".into(),
         text: "Typed commentary completed late".into(),
         phase: Some(codex_protocol::models::MessagePhase::Commentary),
@@ -435,6 +443,8 @@ fn snapshot_keeps_typed_item_completed_after_voice_handoff() {
         delivery: None,
     };
     let private = ThreadItem::AgentMessage {
+        model: None,
+        model_tier: None,
         id: "private".into(),
         text: "Voice-private commentary".into(),
         phase: Some(codex_protocol::models::MessagePhase::Commentary),
@@ -553,6 +563,8 @@ async fn evicted_voice_marker_survives_widget_snapshot_for_late_reasoning() {
             turn_id: "voice-turn".into(),
             completed_at_ms: 0,
             item: ThreadItem::AgentMessage {
+                model: None,
+                model_tier: None,
                 id: "private-commentary".into(),
                 text: "[COMMENTARY] private after switch".into(),
                 phase: None,

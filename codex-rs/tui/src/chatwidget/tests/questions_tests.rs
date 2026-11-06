@@ -647,6 +647,8 @@ fn open_questions(chat: &mut ChatWidget, options: Option<Vec<String>>) {
         AgentMessageItem {
             id: "review".into(),
             content: Vec::new(),
+            model: None,
+            model_tier: None,
             phase: None,
             memory_citation: None,
             delivery: None,
@@ -777,6 +779,8 @@ async fn question_drafts_survive_navigation_and_snapshot_replay() {
     let saved = chat.capture_thread_input_state();
     let (mut chat, _rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
     let item = AppServerThreadItem::AgentMessage {
+        model: None,
+        model_tier: None,
         id: "buffered".into(),
         text: String::new(),
         phase: None,

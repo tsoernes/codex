@@ -2849,6 +2849,8 @@ fn completed_legacy_event_history_is_not_mid_turn() {
             ..Default::default()
         })),
         RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
+            model: None,
+            model_tier: None,
             message: "done".to_string(),
             phase: None,
             memory_citation: None,

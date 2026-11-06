@@ -48,6 +48,8 @@ pub(super) struct TranscriptState {
     /// Latest `/status` card and fields, retained across copying until a later turn or command.
     pub(super) last_status_copy_targets: Option<StatusCopySource>,
     pub(super) last_completed_agent_message: Option<(String, String)>,
+    /// Model/tier label for the latest assistant message in the current turn.
+    pub(super) last_completed_agent_model_label: Option<String>,
     /// Raw markdown of the most recently completed proposed plan.
     pub(super) latest_proposed_plan_markdown: Option<String>,
     /// Whether this turn already produced a copyable response.
@@ -106,6 +108,7 @@ impl TranscriptState {
     pub(super) fn reset_turn_flags(&mut self) {
         self.saw_copy_source_this_turn = false;
         self.last_completed_agent_message = None;
+        self.last_completed_agent_model_label = None;
         self.saw_plan_update_this_turn = false;
         self.saw_plan_item_this_turn = false;
         self.latest_proposed_plan_markdown = None;

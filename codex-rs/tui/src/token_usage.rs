@@ -58,6 +58,21 @@ pub(crate) struct TokenUsageInfo {
     pub(crate) total_token_usage: TokenUsage,
     pub(crate) last_token_usage: TokenUsage,
     pub(crate) model_context_window: Option<i64>,
+    pub(crate) model_routing_usage: Option<ModelRoutingUsage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ModelRoutingUsage {
+    pub(crate) simple_model_slug: String,
+    pub(crate) simple_input_tokens: i64,
+    pub(crate) simple_cached_input_tokens: i64,
+    pub(crate) simple_cache_write_input_tokens: i64,
+    pub(crate) simple_output_tokens: i64,
+    pub(crate) reported_total_input_tokens: i64,
+    pub(crate) reported_total_output_tokens: i64,
+    pub(crate) simple_model_responses: i64,
+    pub(crate) total_responses: i64,
+    pub(crate) unreported_responses: i64,
 }
 
 impl fmt::Display for TokenUsage {

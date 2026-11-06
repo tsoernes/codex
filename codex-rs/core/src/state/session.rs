@@ -273,6 +273,16 @@ impl SessionState {
         self.history.update_token_info(usage, model_context_window);
     }
 
+    pub(crate) fn record_model_routing_usage(
+        &mut self,
+        simple_model_slug: &str,
+        response_model_slug: &str,
+        usage: Option<&TokenUsage>,
+    ) {
+        self.history
+            .record_model_routing_usage(simple_model_slug, response_model_slug, usage);
+    }
+
     pub(crate) fn ensure_auto_compact_window_server_prefill_from_usage(
         &mut self,
         usage: &TokenUsage,

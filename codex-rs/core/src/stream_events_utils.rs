@@ -5,10 +5,14 @@ use codex_extension_api::ExtensionData;
 use codex_history::ResponseItemEnvelope;
 use codex_protocol::ResponseItemId;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::items::AgentMessageModelTier;
 use codex_protocol::items::TurnItem;
+use codex_protocol::openai_models::ModelInfo;
 use codex_utils_stream_parser::strip_citations;
 use tokio_util::sync::CancellationToken;
 
+use crate::context::ContextualUserFragment;
+use crate::context::ModelRoutingHistoryNote;
 use crate::function_tool::FunctionCallError;
 use crate::parse_turn_item;
 use crate::session::session::Session;
@@ -41,6 +45,30 @@ fn strip_hidden_assistant_markup(text: &str, plan_mode: bool) -> String {
         strip_proposed_plan_blocks(&without_citations)
     } else {
         without_citations
+    }
+}
+
+pub(crate) fn set_agent_message_model_metadata(
+    item: &mut TurnItem,
+    model_info: &ModelInfo,
+    simple_model: Option<&str>,
+) {
+    if let TurnItem::AgentMessage(message) = item {
+        message.model = Some(
+            model_info
+                .slug
+                .chars()
+                .filter(|character| !character.is_control())
+                .take(128)
+                .collect(),
+        );
+        message.model_tier = simple_model.map(|simple_model| {
+            if model_info.slug == simple_model {
+                AgentMessageModelTier::Simple
+            } else {
+                AgentMessageModelTier::Regular
+            }
+        });
     }
 }
 
@@ -104,6 +132,20 @@ pub(crate) async fn record_completed_response_item_with_finalized_facts(
         std::slice::from_ref(item),
     )
     .await;
+    if turn_context.config.agent_model_routing_scope.is_some()
+        && matches!(item, ResponseItem::Message { role, .. } if role == "assistant")
+    {
+        let model_info = &step_context.settings.model_info;
+        let tier = if model_info.slug == turn_context.config.agent_simple_model {
+            AgentMessageModelTier::Simple
+        } else {
+            AgentMessageModelTier::Regular
+        };
+        let note: ResponseItem =
+            ContextualUserFragment::into(ModelRoutingHistoryNote::new(&model_info.slug, tier));
+        sess.record_conversation_items(turn_context, model_info, std::slice::from_ref(&note))
+            .await;
+    }
     let defers_mailbox_delivery = finalized_facts.map_or_else(
         || {
             completed_item_defers_mailbox_delivery_to_next_turn(
@@ -349,13 +391,25 @@ pub(crate) async fn handle_output_item_done(
                 .services
                 .executed_tool_calls
                 .observe_non_dispatched_call(&item);
-            let finalized_turn_item = finalize_non_tool_response_item(
+            let mut finalized_turn_item = finalize_non_tool_response_item(
                 ctx.sess.as_ref(),
                 TurnItemContributorPolicy::Run(ctx.turn_store.as_ref()),
                 &item,
                 plan_mode,
             )
             .await;
+            if let Some(finalized) = finalized_turn_item.as_mut() {
+                set_agent_message_model_metadata(
+                    &mut finalized.turn_item,
+                    &ctx.step_context.settings.model_info,
+                    ctx.step_context
+                        .turn
+                        .config
+                        .agent_model_routing_scope
+                        .is_some()
+                        .then_some(ctx.step_context.turn.config.agent_simple_model.as_str()),
+                );
+            }
             let finalized_facts = finalized_turn_item
                 .as_ref()
                 .map(|finalized| finalized.facts.clone());

@@ -129,6 +129,8 @@ fn projects_completed_canonical_turn_items() {
         content: vec![AgentMessageContent::Text {
             text: "done".to_string(),
         }],
+        model: None,
+        model_tier: None,
         phase: None,
         memory_citation: None,
         delivery: None,

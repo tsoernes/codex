@@ -7,6 +7,7 @@ use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
+use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::TurnSettingsUpdateOutcome;
 use codex_tools::JsonSchema;
 use codex_tools::ResponsesApiTool;
@@ -18,6 +19,10 @@ use std::collections::BTreeMap;
 const ROUTE_TOOL: &str = "codex_route_model";
 const ESCALATE_TOOL: &str = "codex_escalate_to_regular_model";
 
+pub(crate) fn is_route_model_call(item: &ResponseItem) -> bool {
+    matches!(item, ResponseItem::FunctionCall { name, .. } if name == ROUTE_TOOL)
+}
+
 pub(crate) struct RouteModelHandler;
 
 impl ToolExecutor<ToolInvocation> for RouteModelHandler {
@@ -28,7 +33,7 @@ impl ToolExecutor<ToolInvocation> for RouteModelHandler {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: ROUTE_TOOL.to_string(),
-            description: "Before answering this main-thread request, classify whether the simpler configured model can answer it adequately. Choose `simple` or `regular`; Codex switches the next response model in this same thread.".to_string(),
+            description: "This is an internal routing preflight, not the user-facing answer. Do not answer the request here. Review recent model-routing history notes and user follow-ups; call this tool with `simple` only if the simpler configured model can adequately answer the request, otherwise `regular` (including when uncertain). Codex then issues a separate response with the selected model and normal tools.".to_string(),
             strict: false,
             defer_loading: None,
             parameters: JsonSchema::object(

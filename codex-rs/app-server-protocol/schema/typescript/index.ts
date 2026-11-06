@@ -2,6 +2,7 @@
 
 export type { AbsolutePathBuf } from "./AbsolutePathBuf";
 export type { AgentMessageInputContent } from "./AgentMessageInputContent";
+export type { AgentMessageModelTier } from "./AgentMessageModelTier";
 export type { AgentPath } from "./AgentPath";
 export type { ApplyPatchApprovalParams } from "./ApplyPatchApprovalParams";
 export type { ApplyPatchApprovalResponse } from "./ApplyPatchApprovalResponse";

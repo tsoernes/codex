@@ -282,6 +282,13 @@ fn append_transcript_preview_text(
     let text = match speaker {
         TranscriptPreviewSpeaker::User => Cow::Borrowed(text),
         TranscriptPreviewSpeaker::Assistant => {
+            let text = text
+                .rsplit_once("\n\n`")
+                .filter(|(_, label)| {
+                    (label.starts_with("model=") || label.starts_with("simple_model="))
+                        && label.ends_with('`')
+                })
+                .map_or(text, |(message, _)| message);
             visible_markdown = parse_assistant_markdown(text, cwd).visible_markdown;
             let rewritten = crate::inline_visualization::rewrite_inline_visualizations(
                 &visible_markdown,

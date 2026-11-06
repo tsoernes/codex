@@ -135,6 +135,8 @@ pub(super) fn rollout_items_from_messages(messages: Vec<ConversationMessage>) ->
                     AgentMessageEvent {
                         message: message.text.clone(),
                         phase: None,
+                        model: None,
+                        model_tier: None,
                         memory_citation: None,
                         delivery: None,
                         questions: None,
@@ -158,6 +160,8 @@ fn external_session_imported_marker_item() -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
         message: EXTERNAL_SESSION_IMPORTED_MARKER.to_string(),
         phase: None,
+        model: None,
+        model_tier: None,
         memory_citation: None,
         delivery: None,
         questions: None,
@@ -195,6 +199,7 @@ fn token_count_item(last_model_visible_tokens: i64) -> RolloutItem {
             total_token_usage: usage.clone(),
             last_token_usage: usage,
             model_context_window: None,
+            model_routing_usage: None,
         }),
         rate_limits: None,
     }))

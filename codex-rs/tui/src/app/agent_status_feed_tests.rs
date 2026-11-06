@@ -34,6 +34,8 @@ fn agent_status_uses_bounded_buffered_activity() {
     store.push_notification(ServerNotification::ItemCompleted(
         ItemCompletedNotification {
             item: ThreadItem::AgentMessage {
+                model: None,
+                model_tier: None,
                 id: "message-1".to_string(),
                 text: "Finished checking the focused TUI tests.".to_string(),
                 phase: None,

@@ -1572,6 +1572,8 @@ async fn slash_copy_picker_uses_completed_commentary_during_active_turn() {
             turn_id: "active".to_string(),
             completed_at_ms: 0,
             item: AppServerThreadItem::AgentMessage {
+                model: None,
+                model_tier: None,
                 id: "active-commentary".to_string(),
                 text: commentary.to_string(),
                 phase: Some(MessagePhase::Commentary),

@@ -15,11 +15,13 @@ use chrono::NaiveDate;
 /// Absent metadata occupies no transcript rows.
 /// The display date is fixed at construction so crossing midnight cannot invalidate cached heights;
 /// restoring the conversation constructs new cells and refreshes whether the timestamp needs a date.
+/// A model/tier label, when present, is displayed immediately after the timestamp.
 #[derive(Debug)]
 pub struct FinalMessageSeparator {
     elapsed_seconds: Option<u64>,
     runtime_metrics: Option<RuntimeMetricsSummary>,
     completed_at: Option<DateTime<Local>>,
+    model_label: Option<String>,
     display_date: NaiveDate,
     clock_format: ClockFormat,
 }
@@ -33,6 +35,7 @@ impl FinalMessageSeparator {
             elapsed_seconds,
             runtime_metrics,
             completed_at: None,
+            model_label: None,
             display_date: Local::now().date_naive(),
             clock_format: ClockFormat::TwelveHour,
         }
@@ -53,6 +56,11 @@ impl FinalMessageSeparator {
         runtime_metrics: Option<RuntimeMetricsSummary>,
     ) -> Self {
         self.runtime_metrics = runtime_metrics;
+        self
+    }
+
+    pub(crate) fn with_model_label(mut self, model_label: String) -> Self {
+        self.model_label = Some(model_label);
         self
     }
 
@@ -84,6 +92,9 @@ impl FinalMessageSeparator {
                 completed_at.format(date_format),
                 completed_at.format(self.clock_format.time_format()),
             ));
+        }
+        if let Some(model_label) = &self.model_label {
+            label_parts.push(model_label.clone());
         }
         if let Some(metrics_label) = self.runtime_metrics.and_then(runtime_metrics_label) {
             label_parts.push(metrics_label);

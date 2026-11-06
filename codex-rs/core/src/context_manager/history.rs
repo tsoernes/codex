@@ -50,6 +50,7 @@ use codex_protocol::models::ImageReference;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::protocol::InterAgentCommunication;
+use codex_protocol::protocol::ModelRoutingUsage;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TokenUsageInfo;
@@ -725,6 +726,46 @@ impl ContextManager {
             &Some(usage.clone()),
             model_context_window,
         );
+    }
+
+    pub(crate) fn record_model_routing_usage(
+        &mut self,
+        simple_model_slug: &str,
+        response_model_slug: &str,
+        usage: Option<&TokenUsage>,
+    ) {
+        let mut info = self.token_info.clone().unwrap_or(TokenUsageInfo {
+            total_token_usage: TokenUsage::default(),
+            last_token_usage: TokenUsage::default(),
+            model_context_window: None,
+            model_routing_usage: None,
+        });
+        let mut routing_usage = info
+            .model_routing_usage
+            .take()
+            .filter(|current| current.simple_model_slug == simple_model_slug)
+            .unwrap_or_else(|| ModelRoutingUsage {
+                simple_model_slug: simple_model_slug.to_string(),
+                simple_model_token_usage: TokenUsage::default(),
+                reported_total_token_usage: TokenUsage::default(),
+                simple_model_responses: 0,
+                total_responses: 0,
+                unreported_responses: 0,
+            });
+        routing_usage.total_responses += 1;
+        if response_model_slug == simple_model_slug {
+            routing_usage.simple_model_responses += 1;
+        }
+        if let Some(usage) = usage {
+            routing_usage.reported_total_token_usage.add_assign(usage);
+            if response_model_slug == simple_model_slug {
+                routing_usage.simple_model_token_usage.add_assign(usage);
+            }
+        } else {
+            routing_usage.unreported_responses += 1;
+        }
+        info.model_routing_usage = Some(routing_usage);
+        self.token_info = Some(info);
     }
 
     fn get_non_last_reasoning_items_tokens(&self) -> i64 {

@@ -169,6 +169,7 @@ fn token_info_for(model_slug: &str, config: &Config, usage: &TokenUsage) -> Toke
         total_token_usage: usage.clone(),
         last_token_usage: usage.clone(),
         model_context_window: context_window,
+        model_routing_usage: None,
     }
 }
 
@@ -2209,6 +2210,7 @@ async fn status_context_window_uses_last_usage() {
         total_token_usage: total_usage.clone(),
         last_token_usage: last_usage,
         model_context_window: config.model_context_window,
+        model_routing_usage: None,
     };
     let composite = new_status_output(
         &config,
@@ -2238,6 +2240,62 @@ async fn status_context_window_uses_last_usage() {
     assert!(
         !context_line.contains("102K"),
         "context line should not use total aggregated tokens, got: {context_line}"
+    );
+}
+
+#[tokio::test]
+async fn status_snapshot_includes_simple_model_usage_without_account() {
+    let temp_home = TempDir::new().expect("temp home");
+    let config = test_config(&temp_home).await;
+    let usage = TokenUsage {
+        input_tokens: 600,
+        cached_input_tokens: 0,
+        output_tokens: 100,
+        reasoning_output_tokens: 0,
+        total_tokens: 700,
+    };
+    let token_info = TokenUsageInfo {
+        total_token_usage: usage.clone(),
+        last_token_usage: usage.clone(),
+        model_context_window: config.model_context_window,
+        model_routing_usage: Some(crate::token_usage::ModelRoutingUsage {
+            simple_model_slug: "local-small-model".to_string(),
+            simple_input_tokens: 80,
+            simple_cached_input_tokens: 20,
+            simple_cache_write_input_tokens: 5,
+            simple_output_tokens: 20,
+            reported_total_input_tokens: 600,
+            reported_total_output_tokens: 100,
+            simple_model_responses: 1,
+            total_responses: 3,
+            unreported_responses: 0,
+        }),
+    };
+    let now = chrono::Local
+        .with_ymd_and_hms(2024, 6, 1, 12, 0, 0)
+        .single()
+        .expect("timestamp");
+    let model_slug = get_model_offline_for_tests(config.model.as_deref());
+    let composite = new_status_output(
+        &config,
+        None,
+        Some(&token_info),
+        &usage,
+        &None,
+        /*thread_name*/ None,
+        /*forked_from*/ None,
+        /*rate_limits*/ None,
+        None,
+        now,
+        &model_slug,
+        /*collaboration_mode*/ None,
+        /*reasoning_effort_override*/ None,
+    );
+    let sanitized = sanitize_directory(render_lines(&composite.display_lines(/*width*/ 80)));
+
+    assert_snapshot!(
+        "status_snapshot_includes_simple_model_usage_without_account",
+        sanitized.join("\n")
     );
 }
 
