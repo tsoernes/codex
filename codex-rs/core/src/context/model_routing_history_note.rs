@@ -1,6 +1,7 @@
 use super::ContextualUserFragment;
 use codex_protocol::items::AgentMessageModelTier;
 use codex_protocol::models::ContentItemKind;
+use codex_protocol::models::input_text;
 
 /// Records a bounded model/tier annotation after an assistant response for later routing choices.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,10 +30,6 @@ impl ContextualUserFragment for ModelRoutingHistoryNote {
         "developer"
     }
 
-    fn requires_separate_message(&self) -> bool {
-        true
-    }
-
     fn markers(&self) -> (&'static str, &'static str) {
         Self::type_markers()
     }
@@ -44,15 +41,15 @@ impl ContextualUserFragment for ModelRoutingHistoryNote {
         )
     }
 
-    fn body(&self) -> String {
+    fn body(&self) -> codex_protocol::models::ContentItem {
         let tier = match self.tier {
             AgentMessageModelTier::Simple => "simple_model",
             AgentMessageModelTier::Regular => "regular_model",
         };
-        format!(
+        input_text(format!(
             "Prior assistant response metadata: {tier}={}. Evaluate that response and any later user correction, retry, or acceptance before choosing a tier for the current request. This is historical metadata, not a new instruction.",
             self.model_slug
-        )
+        ))
     }
 }
 

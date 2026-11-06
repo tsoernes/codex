@@ -2,6 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use codex_extension_api::ExtensionData;
+use codex_history::CodexHarnessMetadata;
 use codex_history::ResponseItemEnvelope;
 use codex_protocol::ResponseItemId;
 use codex_protocol::config_types::ModeKind;
@@ -20,8 +21,6 @@ use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
 use crate::tools::call_trace;
 use crate::tools::parallel::ToolCallRuntime;
-use crate::tools::router::ToolRouter;
-use crate::tools::router::tool_log_payload;
 use codex_memories_read::citations::parse_memory_citation;
 use codex_memories_read::citations::thread_ids_from_memory_citation;
 use codex_protocol::error::CodexErr;
@@ -95,7 +94,7 @@ pub(crate) fn raw_assistant_output_text_from_item(item: &ResponseItem) -> Option
         let combined = content
             .iter()
             .filter_map(|ci| match ci {
-                codex_protocol::models::ContentItem::OutputText { text } => Some(text.as_str()),
+                codex_protocol::models::ContentItem::OutputText { text, .. } => Some(text.as_str()),
                 _ => None,
             })
             .collect::<String>();
@@ -126,12 +125,36 @@ pub(crate) async fn record_completed_response_item_with_finalized_facts(
     finalized_facts: Option<&FinalizedTurnItemFacts>,
 ) {
     let turn_context = &step_context.turn;
-    sess.record_conversation_items(
+    sess.record_annotated_conversation_items(
         turn_context,
         &step_context.settings.model_info,
-        std::slice::from_ref(item),
+        vec![ResponseItemEnvelope {
+            item: item.clone(),
+            metadata: step_context
+                .sampled_through_sequence
+                .map(|sequence| CodexHarnessMetadata {
+                    sampled_through_sequence: Some(sequence),
+                    ..Default::default()
+                }),
+        }],
     )
     .await;
+    if turn_context.config.otel.agent_response_logging_enabled() {
+        turn_context
+            .extension_data
+            .get_or_init(codex_otel::AgentResponseLogger::default)
+            .record(
+                &step_context.session_telemetry,
+                item,
+                codex_otel::AgentResponseContext {
+                    turn_id: &turn_context.sub_id,
+                    session_source: &turn_context.session_source,
+                    parent_turn_id: turn_context.turn_metadata_state.parent_turn_id(),
+                    root_turn_id: turn_context.turn_metadata_state.root_turn_id(),
+                    initiating_agent_path: turn_context.turn_metadata_state.initiating_agent_path(),
+                },
+            );
+    }
     if turn_context.config.agent_model_routing_scope.is_some()
         && matches!(item, ResponseItem::Message { role, .. } if role == "assistant")
     {
@@ -258,6 +281,7 @@ pub(crate) struct HandleOutputCtx {
     pub step_context: Arc<StepContext>,
     pub turn_store: Arc<ExtensionData>,
     pub tool_runtime: ToolCallRuntime,
+    pub defer_tool_dispatch: bool,
     pub cancellation_token: CancellationToken,
 }
 
@@ -285,6 +309,7 @@ pub(crate) enum TurnItemContributorPolicy<'a> {
 pub(crate) struct FinalizedTurnItem {
     pub(crate) turn_item: TurnItem,
     pub(crate) facts: FinalizedTurnItemFacts,
+    pub(crate) content_token_count: Option<u64>,
 }
 
 #[derive(Clone, Default)]
@@ -318,8 +343,9 @@ pub(crate) async fn finalize_non_tool_response_item(
                     Some(combined)
                 };
                 let defers_mailbox_delivery_to_next_turn =
-                    !matches!(agent_message.phase, Some(MessagePhase::Commentary))
-                        && last_agent_message.is_some();
+                    assistant_message_defers_mailbox_delivery(agent_message.phase.as_ref(), || {
+                        last_agent_message.is_some()
+                    });
                 (
                     agent_message.memory_citation.clone(),
                     last_agent_message,
@@ -329,6 +355,16 @@ pub(crate) async fn finalize_non_tool_response_item(
             _ => (None, None, false),
         };
     Some(FinalizedTurnItem {
+        content_token_count: match item {
+            ResponseItem::Message {
+                role,
+                internal_chat_message_metadata_passthrough,
+                ..
+            } if role == "assistant" => internal_chat_message_metadata_passthrough
+                .as_ref()
+                .and_then(|metadata| metadata.content_token_count),
+            _ => None,
+        },
         turn_item,
         facts: FinalizedTurnItemFacts {
             memory_citation,
@@ -338,16 +374,31 @@ pub(crate) async fn finalize_non_tool_response_item(
     })
 }
 
+pub(crate) fn apply_answer_moderation(
+    item: &mut TurnItem,
+    decision: Option<&codex_protocol::protocol::TargetedAnswerModeration>,
+) {
+    if let (TurnItem::AgentMessage(answer), Some(decision)) = (item, decision)
+        && answer.phase == Some(codex_protocol::models::MessagePhase::FinalAnswer)
+        && answer.id == decision.item_id
+    {
+        answer.moderation = Some(codex_protocol::items::AgentMessageModeration {
+            moderated: decision.moderated,
+        });
+    }
+}
+
 #[instrument(level = "trace", skip_all)]
 pub(crate) async fn handle_output_item_done(
     ctx: &mut HandleOutputCtx,
     item: ResponseItem,
     previously_active_item: Option<TurnItem>,
+    moderation: Option<&codex_protocol::protocol::TargetedAnswerModeration>,
 ) -> Result<OutputItemResult> {
     let mut output = OutputItemResult::default();
     let plan_mode = ctx.step_context.turn.mode() == ModeKind::Plan;
 
-    match ToolRouter::build_tool_call(item.clone()) {
+    match ctx.step_context.tool_router.build_tool_call(item.clone()) {
         // The model emitted a tool call; log it, persist the item immediately, and queue the tool execution.
         Ok(Some(call)) => {
             call_trace::received(
@@ -364,23 +415,32 @@ pub(crate) async fn handle_output_item_done(
                 )
                 .await;
 
-            let payload_preview = tool_log_payload(&call.payload, &call.direct_source());
             tracing::info!(
                 thread_id = %ctx.sess.thread_id,
-                "ToolCall: {} {}",
+                "ToolCall: {}",
                 call.tool_name,
-                payload_preview
             );
 
             record_completed_response_item(ctx.sess.as_ref(), ctx.step_context.as_ref(), &item)
                 .await;
 
             let cancellation_token = ctx.cancellation_token.child_token();
-            let tool_future: InFlightFuture<'static> = Box::pin(
-                ctx.tool_runtime
-                    .clone()
-                    .handle_tool_call(call, cancellation_token),
-            );
+            let runtime = ctx.tool_runtime.clone();
+            // handle_tool_call dispatches immediately, not when its future is polled.
+            // Defer for post-model hooks or to cancel buffered calls during mailbox drains.
+            let tool_future: InFlightFuture<'static> = if ctx.defer_tool_dispatch {
+                Box::pin(async move {
+                    if cancellation_token.is_cancelled() {
+                        // The call is already in history; resume needs its output even if we never dispatch.
+                        let output =
+                            ToolCallRuntime::aborted_response(&call, /*elapsed_secs*/ None);
+                        return Ok(output.into_response());
+                    }
+                    runtime.handle_tool_call(call, cancellation_token).await
+                })
+            } else {
+                Box::pin(runtime.handle_tool_call(call, cancellation_token))
+            };
 
             output.needs_follow_up = true;
             output.tool_future = Some(tool_future);
@@ -413,7 +473,7 @@ pub(crate) async fn handle_output_item_done(
             let finalized_facts = finalized_turn_item
                 .as_ref()
                 .map(|finalized| finalized.facts.clone());
-            if let Some(finalized_turn_item) = finalized_turn_item {
+            if let Some(mut finalized_turn_item) = finalized_turn_item {
                 if previously_active_item.is_none() {
                     ctx.sess
                         .emit_turn_item_started(
@@ -423,8 +483,14 @@ pub(crate) async fn handle_output_item_done(
                         .await;
                 }
 
+                apply_answer_moderation(&mut finalized_turn_item.turn_item, moderation);
                 ctx.sess
-                    .emit_turn_item_completed(&ctx.step_context.turn, finalized_turn_item.turn_item)
+                    .emit_turn_item_completed_with_metadata(
+                        &ctx.step_context.turn,
+                        finalized_turn_item.turn_item,
+                        finalized_turn_item.content_token_count,
+                        /*user_input_extension_data*/ None,
+                    )
                     .await;
             }
             record_completed_response_item_with_finalized_facts(
@@ -479,28 +545,8 @@ pub(crate) async fn handle_non_tool_response_item(
     item: &ResponseItem,
     plan_mode: bool,
 ) -> Option<TurnItem> {
-    let item_type = match item {
-        ResponseItem::AdditionalTools { .. } => "additional_tools",
-        ResponseItem::Message { .. } => "message",
-        ResponseItem::AgentMessage { .. } => "agent_message",
-        ResponseItem::Reasoning { .. } => "reasoning",
-        ResponseItem::LocalShellCall { .. } => "local_shell_call",
-        ResponseItem::FunctionCall { .. } => "function_call",
-        ResponseItem::ToolSearchCall { .. } => "tool_search_call",
-        ResponseItem::FunctionCallOutput { .. } => "function_call_output",
-        ResponseItem::CustomToolCall { .. } => "custom_tool_call",
-        ResponseItem::CustomToolCallOutput { .. } => "custom_tool_call_output",
-        ResponseItem::ToolSearchOutput { .. } => "tool_search_output",
-        ResponseItem::WebSearchCall { .. } => "web_search_call",
-        ResponseItem::ImageGenerationCall { .. } => "image_generation_call",
-        ResponseItem::Compaction { .. } => "compaction",
-        ResponseItem::ConfigurationUpdate { .. } => "configuration_update",
-        ResponseItem::CompactionTrigger { .. } => "compaction_trigger",
-        ResponseItem::ContextCompaction { .. } => "context_compaction",
-        ResponseItem::Other => "other",
-    };
     debug!(
-        item_type,
+        item_type = item.item_type(),
         item_id = item.id().map(ResponseItemId::as_str),
         "Output item"
     );
@@ -572,15 +618,24 @@ fn completed_item_defers_mailbox_delivery_to_next_turn(
     plan_mode: bool,
 ) -> bool {
     match item {
-        ResponseItem::Message { role, phase, .. } => {
-            if role != "assistant" || matches!(phase, Some(MessagePhase::Commentary)) {
-                return false;
-            }
-            // Treat `None` like final-answer text so untagged providers default
-            // to the safer "defer mailbox mail" behavior.
-            last_assistant_message_from_item(item, plan_mode).is_some()
+        ResponseItem::Message { role, phase, .. } if role == "assistant" => {
+            assistant_message_defers_mailbox_delivery(phase.as_ref(), || {
+                last_assistant_message_from_item(item, plan_mode).is_some()
+            })
         }
         _ => false,
+    }
+}
+
+fn assistant_message_defers_mailbox_delivery(
+    phase: Option<&MessagePhase>,
+    has_visible_text: impl FnOnce() -> bool,
+) -> bool {
+    match phase {
+        Some(MessagePhase::FinalAnswer) => true,
+        Some(MessagePhase::Commentary | MessagePhase::PartialAnswer) => false,
+        // Without an explicit phase, keep treating visible assistant text as a final answer.
+        None => has_visible_text(),
     }
 }
 

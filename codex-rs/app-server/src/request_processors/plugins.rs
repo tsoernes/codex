@@ -8,6 +8,7 @@ use codex_app_server_protocol::PluginAvailability;
 use codex_app_server_protocol::PluginSharePrincipalRole;
 use codex_app_server_protocol::PluginShareTargetRole;
 use codex_config::types::McpServerConfig;
+use codex_config::types::PluginsConfigToml;
 use codex_core_plugins::OPENAI_CURATED_MARKETPLACE_NAME;
 use codex_core_plugins::PluginListBackgroundTaskOptions;
 use codex_core_plugins::PluginMarketplaceContext;
@@ -41,6 +42,8 @@ use codex_rmcp_client::McpOAuthClientRegistration;
 use codex_rmcp_client::OAuthDiscoveryTimeout;
 use codex_rmcp_client::StreamableHttpRedirectMode;
 use codex_rmcp_client::perform_oauth_login_silent;
+use codex_utils_path_uri::LegacyAppPathString;
+use codex_utils_path_uri::PathUri;
 
 mod local;
 mod reconcile;
@@ -67,7 +70,7 @@ pub(crate) struct PluginRequestProcessor {
 
 fn plugin_skills_to_info<'a>(
     skills: impl IntoIterator<Item = &'a codex_skills::SkillMetadata>,
-    disabled_skill_paths: &HashSet<AbsolutePathBuf>,
+    disabled_skill_paths: &HashSet<PathUri>,
 ) -> Vec<SkillSummary> {
     skills
         .into_iter()
@@ -87,7 +90,7 @@ fn plugin_skills_to_info<'a>(
                     default_prompt: interface.default_prompt,
                 }
             }),
-            path: Some(skill.path_to_skills_md.clone()),
+            path: Some(skill.path_to_skills_md.clone().into()),
             enabled: !disabled_skill_paths.contains(&skill.path_to_skills_md),
         })
         .collect()
@@ -156,11 +159,16 @@ fn load_shared_plugin_ids_by_local_path(
     })
 }
 
-fn remote_plugin_service_config(config: &Config) -> RemotePluginServiceConfig {
-    RemotePluginServiceConfig::new(
-        config.chatgpt_base_url.clone(),
-        config.http_client_factory(),
-    )
+fn remote_plugin_service_config(
+    thread_manager: &ThreadManager,
+    config: &Config,
+) -> Result<RemotePluginServiceConfig, JSONRPCErrorError> {
+    let _ = thread_manager
+        .runtime_auth_for_config(config)
+        .map_err(|error| internal_error(error.to_string()))?;
+    Ok(thread_manager
+        .plugins_manager()
+        .remote_plugin_service_config(&config.plugins_config_input()))
 }
 
 fn share_context_for_source(
@@ -599,7 +607,9 @@ impl PluginRequestProcessor {
         let include_global_remote = context.remote_plugins_enabled() && !explicit_marketplace_kinds;
         let use_remote_global_catalog =
             include_global_remote && auth_mode.is_some_and(DomainAuthMode::uses_codex_backend);
-        let remote_plugin_service_config = remote_plugin_service_config(&config);
+        let remote_plugin_service_config =
+            remote_plugin_service_config(&self.thread_manager, &config)?;
+        let plugin_policy = &config.plugins;
         let remote_catalog_cache_mode = if force_refetch {
             RemotePluginCatalogCacheMode::ForceRefetch
         } else {
@@ -688,7 +698,10 @@ impl PluginRequestProcessor {
             .map(|outcome| outcome.marketplace)
             {
                 Ok(Some(remote_marketplace)) => {
-                    data.push(remote_marketplace_to_info(remote_marketplace));
+                    data.push(remote_marketplace_to_info(
+                        remote_marketplace,
+                        plugin_policy,
+                    ));
                 }
                 Ok(None) => {}
                 Err(RemotePluginCatalogError::UnsupportedAuthMode) => {}
@@ -723,22 +736,33 @@ impl PluginRequestProcessor {
         if include_shared_with_me && config.features.enabled(Feature::PluginSharing) {
             remote_sources.push(RemoteMarketplaceSource::SharedWithMe);
         }
+        let featured =
+            plugins_manager.featured_plugin_ids_for_config(&context.global_config, auth.as_ref());
+        tokio::pin!(featured);
+        let mut featured_result = None;
         if !remote_sources.is_empty() {
-            match codex_core_plugins::remote::fetch_remote_marketplaces(
+            let marketplaces = codex_core_plugins::remote::fetch_remote_marketplaces(
                 &remote_plugin_service_config,
                 auth.as_ref(),
                 &remote_sources,
                 /*catalog_cache_root*/ Some(config.codex_home.as_path()),
                 remote_catalog_cache_mode,
-            )
-            .await
-            {
+            );
+            tokio::pin!(marketplaces);
+            let outcome = tokio::select! {
+                outcome = &mut marketplaces => outcome,
+                ids = &mut featured, if use_remote_global_catalog => {
+                    featured_result = Some(ids);
+                    marketplaces.await
+                }
+            };
+            match outcome {
                 Ok(outcome) => {
                     remote_catalog_cache_refresh_scopes = outcome.catalog_cache_refresh_scopes;
                     for remote_marketplace in outcome
                         .marketplaces
                         .into_iter()
-                        .map(remote_marketplace_to_info)
+                        .map(|marketplace| remote_marketplace_to_info(marketplace, plugin_policy))
                     {
                         data.push(remote_marketplace);
                     }
@@ -791,10 +815,11 @@ impl PluginRequestProcessor {
             marketplace.name == OPENAI_CURATED_MARKETPLACE_NAME
                 || marketplace.name == REMOTE_GLOBAL_MARKETPLACE_NAME
         }) {
-            match plugins_manager
-                .featured_plugin_ids_for_config(&context.global_config, auth.as_ref())
-                .await
-            {
+            let result = match featured_result {
+                Some(result) => result,
+                None => featured.await,
+            };
+            match result {
                 Ok(featured_plugin_ids) => featured_plugin_ids,
                 Err(err) => {
                     warn!(
@@ -966,6 +991,7 @@ impl PluginRequestProcessor {
         visible_marketplaces: &[&str],
         auth: Option<&CodexAuth>,
     ) -> Vec<PluginMarketplaceEntry> {
+        let plugin_policy = &plugins_input.plugins;
         let remote_marketplaces = if let Some(remote_marketplaces) = plugins_manager
             .build_remote_installed_plugin_marketplaces_from_cache(visible_marketplaces)
         {
@@ -984,7 +1010,7 @@ impl PluginRequestProcessor {
         match remote_marketplaces {
             Ok(remote_marketplaces) => remote_marketplaces
                 .into_iter()
-                .map(remote_marketplace_to_info)
+                .map(|marketplace| remote_marketplace_to_info(marketplace, plugin_policy))
                 .collect(),
             Err(
                 RemotePluginCatalogError::AuthRequired
@@ -1023,9 +1049,15 @@ impl PluginRequestProcessor {
             marketplace_path.as_path().parent().map(Path::to_path_buf)
         });
 
-        let config = self.load_latest_config(config_cwd).await?;
+        let mut config = self.load_latest_config(config_cwd).await?;
+        let auth = match self.auth_manager.auth_with_http_client_factory().await {
+            Some((auth, factory)) => {
+                config.application_network_policy = factory.network_policy().clone();
+                Some(auth)
+            }
+            None => None,
+        };
         let plugins_input = config.plugins_config_input();
-        let auth = self.auth_manager.auth().await;
 
         let plugin = match read_source {
             Ok(marketplace_path) => {
@@ -1045,7 +1077,8 @@ impl PluginRequestProcessor {
                 );
                 let share_context = match share_context {
                     Some(context) => {
-                        let remote_plugin_service_config = remote_plugin_service_config(&config);
+                        let remote_plugin_service_config =
+                            remote_plugin_service_config(&self.thread_manager, &config)?;
                         match codex_core_plugins::remote::fetch_remote_plugin_share_context(
                             &remote_plugin_service_config,
                             auth.as_ref(),
@@ -1092,6 +1125,7 @@ impl PluginRequestProcessor {
                     None => None,
                 };
                 let app_summaries = load_plugin_app_summaries(
+                    &self.thread_manager,
                     &config,
                     auth.as_ref(),
                     &outcome.plugin.apps,
@@ -1108,9 +1142,18 @@ impl PluginRequestProcessor {
                 let onboarding_skill = if outcome.plugin.enabled
                     && let Some(path) = outcome.plugin.onboarding_skill.as_ref()
                 {
+                    let path = PathUri::from_abs_path(path);
                     skills
                         .iter()
-                        .find(|skill| skill.enabled && skill.path.as_ref() == Some(path))
+                        .find(|skill| {
+                            skill.enabled
+                                && skill
+                                    .path
+                                    .as_ref()
+                                    .and_then(LegacyAppPathString::to_inferred_path_uri)
+                                    .as_ref()
+                                    == Some(&path)
+                        })
                         .cloned()
                 } else {
                     None
@@ -1164,7 +1207,8 @@ impl PluginRequestProcessor {
                         "remote plugin read is not enabled for marketplace {remote_marketplace_name}"
                     )));
                 }
-                let remote_plugin_service_config = remote_plugin_service_config(&config);
+                let remote_plugin_service_config =
+                    remote_plugin_service_config(&self.thread_manager, &config)?;
                 validate_remote_plugin_id(&plugin_name)?;
                 let remote_detail = codex_core_plugins::remote::fetch_remote_plugin_detail(
                     &remote_plugin_service_config,
@@ -1188,13 +1232,15 @@ impl PluginRequestProcessor {
                     .map(plugin_app_category_by_id_from_value)
                     .unwrap_or_default();
                 let app_summaries = load_plugin_app_summaries(
+                    &self.thread_manager,
                     &config,
                     auth.as_ref(),
                     &plugin_apps,
                     &app_category_by_id,
                 )
                 .await;
-                remote_plugin_detail_to_info(remote_detail, app_summaries)
+                let plugin_policy = &config.plugins;
+                remote_plugin_detail_to_info(remote_detail, app_summaries, plugin_policy)
             }
         };
 
@@ -1225,7 +1271,8 @@ impl PluginRequestProcessor {
         }
 
         let auth = self.auth_manager.auth().await;
-        let remote_plugin_service_config = remote_plugin_service_config(&config);
+        let remote_plugin_service_config =
+            remote_plugin_service_config(&self.thread_manager, &config)?;
         let remote_skill_detail = codex_core_plugins::remote::fetch_remote_plugin_skill_detail(
             &remote_plugin_service_config,
             auth.as_ref(),
@@ -1276,7 +1323,8 @@ impl PluginRequestProcessor {
             validate_client_plugin_share_targets(share_targets)?;
         }
 
-        let remote_plugin_service_config = remote_plugin_service_config(&config);
+        let remote_plugin_service_config =
+            remote_plugin_service_config(&self.thread_manager, &config)?;
         let access_policy = codex_core_plugins::remote::RemotePluginShareAccessPolicy {
             discoverability: discoverability.map(remote_plugin_share_discoverability),
             share_targets: share_targets.map(remote_plugin_share_targets),
@@ -1324,7 +1372,8 @@ impl PluginRequestProcessor {
         }
         validate_client_plugin_share_targets(&share_targets)?;
 
-        let remote_plugin_service_config = remote_plugin_service_config(&config);
+        let remote_plugin_service_config =
+            remote_plugin_service_config(&self.thread_manager, &config)?;
         let result = codex_core_plugins::remote::update_remote_plugin_share_targets(
             &remote_plugin_service_config,
             auth.as_ref(),
@@ -1358,7 +1407,9 @@ impl PluginRequestProcessor {
         _params: PluginShareListParams,
     ) -> Result<PluginShareListResponse, JSONRPCErrorError> {
         let (config, auth) = self.load_plugin_share_config_and_auth().await?;
-        let remote_plugin_service_config = remote_plugin_service_config(&config);
+        let remote_plugin_service_config =
+            remote_plugin_service_config(&self.thread_manager, &config)?;
+        let plugin_policy = &config.plugins;
         let data = codex_core_plugins::remote::list_remote_plugin_shares(
             &remote_plugin_service_config,
             auth.as_ref(),
@@ -1372,7 +1423,7 @@ impl PluginRequestProcessor {
                 summary,
                 local_plugin_path,
             } = summary;
-            let plugin = remote_plugin_summary_to_info(summary);
+            let plugin = remote_plugin_summary_to_info(summary, plugin_policy);
             PluginShareListItem {
                 plugin,
                 local_plugin_path,
@@ -1395,7 +1446,8 @@ impl PluginRequestProcessor {
             return Err(invalid_request("invalid remote plugin id"));
         }
 
-        let remote_plugin_service_config = remote_plugin_service_config(&config);
+        let remote_plugin_service_config =
+            remote_plugin_service_config(&self.thread_manager, &config)?;
         let result = codex_core_plugins::remote::checkout_remote_plugin_share(
             &remote_plugin_service_config,
             auth.as_ref(),
@@ -1426,7 +1478,8 @@ impl PluginRequestProcessor {
             return Err(invalid_request("invalid remote plugin id"));
         }
 
-        let remote_plugin_service_config = remote_plugin_service_config(&config);
+        let remote_plugin_service_config =
+            remote_plugin_service_config(&self.thread_manager, &config)?;
         codex_core_plugins::remote::delete_remote_plugin_share(
             &remote_plugin_service_config,
             auth.as_ref(),
@@ -1484,8 +1537,14 @@ impl PluginRequestProcessor {
             }
         };
         let config_cwd = marketplace_path.as_path().parent().map(Path::to_path_buf);
-        let config = self.load_latest_config(config_cwd.clone()).await?;
-        let auth = self.auth_manager.auth().await;
+        let mut config = self.load_latest_config(config_cwd.clone()).await?;
+        let auth = match self.auth_manager.auth_with_http_client_factory().await {
+            Some((auth, factory)) => {
+                config.application_network_policy = factory.network_policy().clone();
+                Some(auth)
+            }
+            None => None,
+        };
 
         let plugins_manager = self.thread_manager.plugins_manager();
         let marketplace_display = marketplace_path.display().to_string();
@@ -1510,7 +1569,11 @@ impl PluginRequestProcessor {
             }
         };
         let config = match self.load_latest_config(config_cwd).await {
-            Ok(config) => config,
+            Ok(mut reloaded_config) => {
+                // Keep the policy captured with this installation's auth snapshot.
+                reloaded_config.application_network_policy = config.application_network_policy;
+                reloaded_config
+            }
             Err(err) => {
                 warn!(
                     "failed to reload config after plugin install, using current config: {err:?}"
@@ -1543,7 +1606,8 @@ impl PluginRequestProcessor {
             .await;
         }
 
-        let plugin_app_declarations = load_plugin_apps(result.installed_path.as_path()).await;
+        let plugin_app_declarations =
+            load_plugin_apps(result.installed_path.as_path(), &result.plugin_id).await;
         let apps_needing_auth = self
             .plugin_apps_needing_auth_for_install(
                 &config,
@@ -1565,8 +1629,18 @@ impl PluginRequestProcessor {
         remote_plugin_id: String,
         install_attempt_id: Option<String>,
     ) -> Result<PluginInstallResponse, JSONRPCErrorError> {
-        let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
-        let auth = self.auth_manager.auth().await;
+        let mut config = self.load_latest_config(/*fallback_cwd*/ None).await?;
+        let _ = self
+            .thread_manager
+            .runtime_auth_for_config(&config)
+            .map_err(|error| internal_error(error.to_string()))?;
+        let auth = match self.auth_manager.auth_with_http_client_factory().await {
+            Some((auth, factory)) => {
+                config.application_network_policy = factory.network_policy().clone();
+                Some(auth)
+            }
+            None => None,
+        };
         let plugins_manager = self.thread_manager.plugins_manager();
         let installation = plugins_manager
             .install_remote_plugin(
@@ -1634,6 +1708,30 @@ impl PluginRequestProcessor {
         self.analytics_events_client
             .track_plugin_installed(plugin_metadata);
 
+        let config = match self.load_latest_config(/*fallback_cwd*/ None).await {
+            Ok(mut reloaded_config) => {
+                // Keep the policy captured with this installation's auth snapshot.
+                reloaded_config.application_network_policy = config.application_network_policy;
+                reloaded_config
+            }
+            Err(err) => {
+                warn!(
+                    "failed to reload config after remote plugin install, skipping auth setup: {err:?}"
+                );
+                return Ok(PluginInstallResponse {
+                    auth_policy: remote_detail.summary.auth_policy,
+                    apps_needing_auth: Vec::new(),
+                });
+            }
+        };
+
+        if !config.plugins.allows_plugin(&result.plugin_id.as_key()) {
+            return Ok(PluginInstallResponse {
+                auth_policy: remote_detail.summary.auth_policy,
+                apps_needing_auth: Vec::new(),
+            });
+        }
+
         let plugin_mcp_servers = load_configured_plugin_mcp_servers(
             result.installed_path.as_path(),
             auth.as_ref().map(CodexAuth::auth_mode),
@@ -1654,36 +1752,42 @@ impl PluginRequestProcessor {
         }
 
         let is_chatgpt_auth = auth.as_ref().is_some_and(CodexAuth::is_chatgpt_auth);
-        let apps_needing_auth = if let Some(app_ids_needing_auth) =
-            installation.app_ids_needing_auth
-        {
-            if app_ids_needing_auth.is_empty()
-                || !config.features.apps_enabled_for_auth(is_chatgpt_auth)
-            {
-                Vec::new()
-            } else {
-                let plugin_apps = app_ids_needing_auth
-                    .into_iter()
-                    .map(codex_plugin::AppConnectorId)
-                    .collect::<Vec<_>>();
-                let app_category_by_id = remote_detail
-                    .app_manifest
-                    .as_ref()
-                    .map(plugin_app_category_by_id_from_value)
-                    .unwrap_or_default();
-                load_plugin_app_summaries(&config, auth.as_ref(), &plugin_apps, &app_category_by_id)
+        let apps_needing_auth =
+            if let Some(app_ids_needing_auth) = installation.app_ids_needing_auth {
+                if app_ids_needing_auth.is_empty()
+                    || !config.features.apps_enabled_for_auth(is_chatgpt_auth)
+                {
+                    Vec::new()
+                } else {
+                    let plugin_apps = app_ids_needing_auth
+                        .into_iter()
+                        .map(codex_plugin::AppConnectorId)
+                        .collect::<Vec<_>>();
+                    let app_category_by_id = remote_detail
+                        .app_manifest
+                        .as_ref()
+                        .map(plugin_app_category_by_id_from_value)
+                        .unwrap_or_default();
+                    load_plugin_app_summaries(
+                        &self.thread_manager,
+                        &config,
+                        auth.as_ref(),
+                        &plugin_apps,
+                        &app_category_by_id,
+                    )
                     .await
-            }
-        } else {
-            let plugin_app_declarations = load_plugin_apps(result.installed_path.as_path()).await;
-            self.plugin_apps_needing_auth_for_install(
-                &config,
-                auth.as_ref(),
-                &result.plugin_id.as_key(),
-                &plugin_app_declarations,
-            )
-            .await
-        };
+                }
+            } else {
+                let plugin_app_declarations =
+                    load_plugin_apps(result.installed_path.as_path(), &result.plugin_id).await;
+                self.plugin_apps_needing_auth_for_install(
+                    &config,
+                    auth.as_ref(),
+                    &result.plugin_id.as_key(),
+                    &plugin_app_declarations,
+                )
+                .await
+            };
 
         Ok(PluginInstallResponse {
             auth_policy: remote_detail.summary.auth_policy,
@@ -1754,7 +1858,13 @@ impl PluginRequestProcessor {
             .collect();
         let environment_manager = self.thread_manager.environment_manager();
         let (app_summaries, accessible_connectors_result) = tokio::join!(
-            load_plugin_app_summaries(config, auth, &plugin_apps, &app_category_by_id),
+            load_plugin_app_summaries(
+                &self.thread_manager,
+                config,
+                auth,
+                &plugin_apps,
+                &app_category_by_id
+            ),
             connectors::list_accessible_connectors_from_mcp_tools_with_mcp_manager(
                 config,
                 /*force_refetch*/ true,
@@ -1771,8 +1881,7 @@ impl PluginRequestProcessor {
                     "failed to load accessible apps after plugin install: {err:#}"
                 );
                 (
-                    connectors::list_cached_accessible_connectors_from_mcp_tools(config)
-                        .await
+                    connectors::list_cached_accessible_connectors_from_mcp_tools(config, auth)
                         .unwrap_or_default(),
                     false,
                 )
@@ -1879,7 +1988,7 @@ impl PluginRequestProcessor {
             let global_callback_url = config.mcp_oauth_callback_url.clone();
 
             tokio::spawn(async move {
-                let oauth_client_id = server.oauth_client_id();
+                let oauth_client_config = server.oauth.as_ref();
                 let first_attempt = perform_oauth_login_silent(
                     &oauth_credential_name,
                     &oauth_config.url,
@@ -1888,7 +1997,7 @@ impl PluginRequestProcessor {
                     oauth_config.http_headers.clone(),
                     oauth_config.env_http_headers.clone(),
                     &resolved_scopes.scopes,
-                    oauth_client_id,
+                    oauth_client_config,
                     McpOAuthClientRegistration::Auto,
                     server.oauth_resource.as_deref(),
                     callback_port,
@@ -1909,7 +2018,7 @@ impl PluginRequestProcessor {
                             oauth_config.http_headers,
                             oauth_config.env_http_headers,
                             &[],
-                            oauth_client_id,
+                            oauth_client_config,
                             McpOAuthClientRegistration::Auto,
                             server.oauth_resource.as_deref(),
                             callback_port,
@@ -1935,6 +2044,7 @@ impl PluginRequestProcessor {
                     McpServerOauthLoginCompletedNotification {
                         name: notification_name,
                         thread_id: None,
+                        login_id: None,
                         success,
                         error,
                     },
@@ -2040,6 +2150,10 @@ impl PluginRequestProcessor {
         plugin_id: String,
     ) -> Result<PluginUninstallResponse, JSONRPCErrorError> {
         let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
+        let _ = self
+            .thread_manager
+            .runtime_auth_for_config(&config)
+            .map_err(|error| internal_error(error.to_string()))?;
         let auth = self.auth_manager.auth().await;
         let outcome = self
             .thread_manager
@@ -2069,6 +2183,7 @@ impl PluginRequestProcessor {
 }
 
 async fn load_plugin_app_summaries(
+    thread_manager: &ThreadManager,
     config: &Config,
     auth: Option<&CodexAuth>,
     plugin_apps: &[codex_plugin::AppConnectorId],
@@ -2095,9 +2210,17 @@ async fn load_plugin_app_summaries(
             )
             .fresh_records(&app_ids, /*include_tools*/ false),
         );
+        let runtime = thread_manager.runtime_auth_for_config(config);
         for app_ids in app_ids.chunks(APP_READ_MAX_IDS) {
+            let runtime = match &runtime {
+                Ok(runtime) => runtime.as_ref(),
+                Err(error) => {
+                    warn!("failed to initialize app metadata authentication: {error}");
+                    break;
+                }
+            };
             match connectors::read_connector_metadata(
-                config, auth, app_ids, /*include_tools*/ false,
+                config, auth, runtime, app_ids, /*include_tools*/ false,
             )
             .await
             {
@@ -2143,7 +2266,10 @@ fn plugin_app_category_by_id_from_value(value: &serde_json::Value) -> HashMap<St
         .collect()
 }
 
-fn remote_marketplace_to_info(marketplace: RemoteMarketplace) -> PluginMarketplaceEntry {
+fn remote_marketplace_to_info(
+    marketplace: RemoteMarketplace,
+    plugin_policy: &PluginsConfigToml,
+) -> PluginMarketplaceEntry {
     PluginMarketplaceEntry {
         name: marketplace.name,
         path: None,
@@ -2153,12 +2279,16 @@ fn remote_marketplace_to_info(marketplace: RemoteMarketplace) -> PluginMarketpla
         plugins: marketplace
             .plugins
             .into_iter()
-            .map(remote_plugin_summary_to_info)
+            .map(|summary| remote_plugin_summary_to_info(summary, plugin_policy))
             .collect(),
     }
 }
 
-fn remote_plugin_summary_to_info(summary: RemoteCatalogPluginSummary) -> PluginSummary {
+fn remote_plugin_summary_to_info(
+    summary: RemoteCatalogPluginSummary,
+    plugin_policy: &PluginsConfigToml,
+) -> PluginSummary {
+    let enabled = summary.enabled && plugin_policy.allows_plugin(&summary.id);
     PluginSummary {
         id: summary.id,
         remote_plugin_id: Some(summary.remote_plugin_id),
@@ -2173,7 +2303,7 @@ fn remote_plugin_summary_to_info(summary: RemoteCatalogPluginSummary) -> PluginS
         installed_at: summary
             .installed_at
             .map(|installed_at| installed_at.timestamp()),
-        enabled: summary.enabled,
+        enabled,
         install_policy: summary.install_policy,
         install_policy_source: summary.install_policy_source,
         must_show_installation_interstitial: summary.must_show_installation_interstitial,
@@ -2227,7 +2357,9 @@ fn remote_plugin_share_discoverability_to_info(
 fn remote_plugin_detail_to_info(
     detail: RemoteCatalogPluginDetail,
     apps: Vec<AppSummary>,
+    plugin_policy: &PluginsConfigToml,
 ) -> PluginDetail {
+    let summary = remote_plugin_summary_to_info(detail.summary, plugin_policy);
     let app_templates = detail
         .app_templates
         .into_iter()
@@ -2263,8 +2395,8 @@ fn remote_plugin_detail_to_info(
             enabled: skill.enabled,
         })
         .collect::<Vec<_>>();
-    let onboarding_skill = if detail.summary.enabled
-        && detail.summary.availability == PluginAvailability::Available
+    let onboarding_skill = if summary.enabled
+        && summary.availability == PluginAvailability::Available
         && let Some(name) = detail.onboarding_skill_name.as_ref()
     {
         skills
@@ -2278,7 +2410,7 @@ fn remote_plugin_detail_to_info(
     PluginDetail {
         marketplace_name: detail.marketplace_name,
         marketplace_path: None,
-        summary: remote_plugin_summary_to_info(detail.summary),
+        summary,
         share_url: detail.share_url,
         description: detail.description,
         skills,
@@ -2320,6 +2452,7 @@ fn remote_plugin_catalog_error_type(err: &RemotePluginCatalogError) -> &'static 
         RemotePluginCatalogError::ArchiveTooLarge { .. } => "remote_catalog_archive_too_large",
         RemotePluginCatalogError::MissingUploadEtag => "remote_catalog_missing_upload_etag",
         RemotePluginCatalogError::UnexpectedResponse(_) => "remote_catalog_unexpected_response",
+        RemotePluginCatalogError::InstalledPluginsFetchTimeout => "remote_catalog_timeout",
         RemotePluginCatalogError::CacheRemove(_) => "remote_catalog_cache_remove",
     }
 }
@@ -2389,6 +2522,7 @@ fn remote_plugin_catalog_error_to_jsonrpc(
         | RemotePluginCatalogError::ArchiveJoin(_)
         | RemotePluginCatalogError::MissingUploadEtag
         | RemotePluginCatalogError::UnexpectedResponse(_)
+        | RemotePluginCatalogError::InstalledPluginsFetchTimeout
         | RemotePluginCatalogError::CacheRemove(_) => internal_error(message),
     }
 }

@@ -9,7 +9,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
-use core_test_support::responses::ev_function_call;
+use core_test_support::responses::ev_custom_tool_call;
 use core_test_support::responses::ev_function_call_with_namespace;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_response_once_match;
@@ -21,10 +21,50 @@ use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::test_codex;
 use pretty_assertions::assert_eq;
+use serde_json::Value;
 use serde_json::json;
 
 const REGULAR_MODEL: &str = "gpt-6.1-sol";
 const SIMPLE_MODEL: &str = "gpt-6-luna";
+
+fn input_tool_names(body: &Value) -> Vec<String> {
+    body["input"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["type"] == "additional_tools")
+        .next_back()
+        .into_iter()
+        .flat_map(|item| item["tools"].as_array().into_iter().flatten())
+        .flat_map(|tool| {
+            if tool["type"] == "namespace" {
+                tool["tools"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|nested| nested["name"].as_str().map(str::to_owned))
+                    .collect::<Vec<_>>()
+            } else {
+                tool["name"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .into_iter()
+                    .collect()
+            }
+        })
+        .collect()
+}
+
+fn request_agent_name(body: &Value) -> Option<String> {
+    body["client_metadata"]["x-codex-turn-metadata"]
+        .as_str()
+        .and_then(|value| serde_json::from_str::<Value>(value).ok())
+        .and_then(|metadata| metadata["agent_name"].as_str().map(str::to_owned))
+}
+
+fn is_regular_followup_agent(body: &Value) -> bool {
+    request_agent_name(body).is_some_and(|name| name.ends_with("/regular_followup"))
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn all_scope_routes_and_escalates_in_the_main_thread() -> Result<()> {
@@ -51,8 +91,9 @@ async fn all_scope_routes_and_escalates_in_the_main_thread() -> Result<()> {
         vec![
             sse(vec![
                 ev_response_created("route"),
-                ev_function_call(
+                ev_function_call_with_namespace(
                     "route-call",
+                    "functions",
                     "codex_route_model",
                     &json!({"tier": "simple"}).to_string(),
                 ),
@@ -61,7 +102,12 @@ async fn all_scope_routes_and_escalates_in_the_main_thread() -> Result<()> {
             sse(vec![
                 ev_response_created("simple"),
                 ev_assistant_message("message-simple", "A concise answer from the simple model."),
-                ev_function_call("escalate-call", "codex_escalate_to_regular_model", "{}"),
+                ev_function_call_with_namespace(
+                    "escalate-call",
+                    "functions",
+                    "codex_escalate_to_regular_model",
+                    "{}",
+                ),
                 completed_with_usage("simple", 80, 20),
             ]),
             sse(vec![
@@ -124,11 +170,10 @@ async fn all_scope_routes_and_escalates_in_the_main_thread() -> Result<()> {
     );
     let first_request_body = requests[0].body_json();
     assert_eq!(first_request_body["tool_choice"], "required");
-    let first_tools = first_request_body["tools"]
-        .as_array()
-        .expect("routing request should expose a tool list");
-    assert_eq!(first_tools.len(), 1);
-    assert_eq!(first_tools[0]["name"], "codex_route_model");
+    assert_eq!(
+        input_tool_names(&first_request_body),
+        vec!["codex_route_model"]
+    );
     assert!(
         first_request_body["instructions"]
             .as_str()
@@ -140,19 +185,9 @@ async fn all_scope_routes_and_escalates_in_the_main_thread() -> Result<()> {
         "the initial request should explicitly be a routing preflight"
     );
     let simple_request_body = requests[1].body_json();
-    let simple_tools = simple_request_body["tools"]
-        .as_array()
-        .expect("the selected model should receive the normal tool list");
-    assert!(
-        simple_tools
-            .iter()
-            .any(|tool| tool["name"] == "exec_command")
-    );
-    assert!(
-        !simple_tools
-            .iter()
-            .any(|tool| tool["name"] == "codex_route_model")
-    );
+    let simple_tools = input_tool_names(&simple_request_body);
+    assert!(simple_tools.iter().any(|tool| tool == "exec"));
+    assert!(!simple_tools.iter().any(|tool| tool == "codex_route_model"));
     assert!(
         requests[2]
             .message_input_texts("developer")
@@ -208,15 +243,10 @@ async fn all_scope_discards_an_unrouted_answer_and_retries_with_regular_tools() 
             ]),
             sse(vec![
                 ev_response_created("regular-tool-use"),
-                ev_function_call(
+                ev_custom_tool_call(
                     "shell-call",
-                    "exec_command",
-                    &json!({
-                        "cmd": "printf ROUTING_PREFLIGHT_FALLBACK_WORKED",
-                        "login": false,
-                        "yield_time_ms": 1_000,
-                    })
-                    .to_string(),
+                    "exec",
+                    "text('ROUTING_PREFLIGHT_FALLBACK_WORKED')",
                 ),
                 ev_completed("regular-tool-use"),
             ]),
@@ -288,11 +318,9 @@ async fn all_scope_discards_an_unrouted_answer_and_retries_with_regular_tools() 
         "unrouted assistant text must not enter the retried request history"
     );
     assert!(
-        requests[1].body_json()["tools"]
-            .as_array()
-            .expect("regular-model retry should expose normal tools")
+        input_tool_names(&requests[1].body_json())
             .iter()
-            .any(|tool| tool["name"] == "exec_command")
+            .any(|tool| tool == "exec")
     );
     assert_eq!(
         assistant_messages,
@@ -313,8 +341,9 @@ async fn all_scope_can_select_the_regular_model_without_switching_away() -> Resu
         vec![
             sse(vec![
                 ev_response_created("regular-route"),
-                ev_function_call(
+                ev_function_call_with_namespace(
                     "regular-route-call",
+                    "functions",
                     "codex_route_model",
                     &json!({"tier": "regular"}).to_string(),
                 ),
@@ -370,8 +399,9 @@ async fn all_scope_simple_answer_completes_without_escalation_or_provider_usage(
         vec![
             sse(vec![
                 ev_response_created("simple-route"),
-                ev_function_call(
+                ev_function_call_with_namespace(
                     "simple-route-call",
+                    "functions",
                     "codex_route_model",
                     &json!({"tier": "simple"}).to_string(),
                 ),
@@ -476,11 +506,9 @@ async fn subagents_only_scope_does_not_route_main_thread_messages() -> Result<()
     assert_eq!(body["model"], REGULAR_MODEL);
     assert_ne!(body["tool_choice"], "required");
     assert!(
-        !body["tools"]
-            .as_array()
-            .expect("model-visible tool list")
+        !input_tool_names(&body)
             .iter()
-            .any(|tool| tool["name"] == "codex_route_model")
+            .any(|tool| tool == "codex_route_model")
     );
 
     test.codex.shutdown_and_wait().await?;
@@ -492,7 +520,6 @@ async fn simple_subagent_escalation_spawns_a_regular_model_subagent() -> Result<
     skip_if_no_network!(Ok(()));
 
     const TASK: &str = "Investigate the delegated model-routing behavior.";
-    const ESCALATION: &str = "CODEX_SIMPLE_MODEL_ESCALATION: yes";
     const SIMPLE_SUBAGENT_RESPONSE: &str =
         "Partial analysis. CODEX_SIMPLE_MODEL_ESCALATION: yes: the result needs verification.";
     const REGULAR_SUBAGENT_TASK: &str =
@@ -506,9 +533,7 @@ async fn simple_subagent_escalation_spawns_a_regular_model_subagent() -> Result<
         |request: &wiremock::Request| {
             let body: serde_json::Value =
                 request.body_json().expect("request should be valid JSON");
-            body["model"] == REGULAR_MODEL
-                && body["input"].to_string().contains(TASK)
-                && !body["input"].to_string().contains(ESCALATION)
+            body["model"] == REGULAR_MODEL && body["input"].to_string().contains(TASK)
         },
         sse(vec![
             ev_response_created("parent-spawn-simple"),
@@ -561,7 +586,8 @@ async fn simple_subagent_escalation_spawns_a_regular_model_subagent() -> Result<
         |request: &wiremock::Request| {
             let body: serde_json::Value =
                 request.body_json().expect("request should be valid JSON");
-            body["model"] == REGULAR_MODEL && body["input"].to_string().contains(ESCALATION)
+            body["model"] == REGULAR_MODEL
+                && body["input"].to_string().contains(SIMPLE_SUBAGENT_RESPONSE)
         },
         sse(vec![
             ev_response_created("parent-spawn-regular"),
@@ -586,9 +612,8 @@ async fn simple_subagent_escalation_spawns_a_regular_model_subagent() -> Result<
             let body: serde_json::Value =
                 request.body_json().expect("request should be valid JSON");
             body["model"] == REGULAR_MODEL
+                && is_regular_followup_agent(&body)
                 && body["input"].to_string().contains(REGULAR_SUBAGENT_TASK)
-                && body["input"].to_string().contains("agent_message")
-                && !body["input"].to_string().contains("spawn-regular-subagent")
         },
         sse_response(sse(vec![
             ev_response_created("regular-subagent-response"),
@@ -606,6 +631,7 @@ async fn simple_subagent_escalation_spawns_a_regular_model_subagent() -> Result<
             body["model"] == REGULAR_MODEL
                 && body["input"].to_string().contains("spawn-regular-subagent")
                 && !body["input"].to_string().contains(REGULAR_SUBAGENT_RESULT)
+                && !is_regular_followup_agent(&body)
         },
         sse(vec![
             ev_response_created("parent-waits-for-regular"),
@@ -622,6 +648,7 @@ async fn simple_subagent_escalation_spawns_a_regular_model_subagent() -> Result<
             body["model"] == REGULAR_MODEL
                 && body["input"].to_string().contains("wait-regular-1")
                 && !body["input"].to_string().contains(REGULAR_SUBAGENT_RESULT)
+                && !is_regular_followup_agent(&body)
         },
         sse(vec![
             ev_response_created("parent-retries-regular-wait"),
@@ -638,6 +665,7 @@ async fn simple_subagent_escalation_spawns_a_regular_model_subagent() -> Result<
             body["model"] == REGULAR_MODEL
                 && body["input"].to_string().contains("wait-regular-2")
                 && !body["input"].to_string().contains(REGULAR_SUBAGENT_RESULT)
+                && !is_regular_followup_agent(&body)
         },
         sse(vec![
             ev_response_created("parent-retries-regular-wait-again"),
@@ -699,11 +727,23 @@ async fn simple_subagent_escalation_spawns_a_regular_model_subagent() -> Result<
         .build_with_auto_env(&server)
         .await?;
 
-    tokio::time::timeout(
-        std::time::Duration::from_secs(20),
-        test.submit_text_turn(TASK),
-    )
-    .await??;
+    test.codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: TASK.to_string(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    let turn_result = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            let event = test.codex.next_event().await?;
+            if matches!(&event.msg, EventMsg::TurnComplete(_)) {
+                break;
+            }
+        }
+        Ok::<_, anyhow::Error>(())
+    })
+    .await;
+    turn_result??;
 
     let captured_requests = server
         .received_requests()
@@ -730,7 +770,8 @@ async fn simple_subagent_escalation_spawns_a_regular_model_subagent() -> Result<
     );
     assert!(
         captured_requests.iter().any(|body| {
-            body["model"] == REGULAR_MODEL && body["input"].to_string().contains(ESCALATION)
+            body["model"] == REGULAR_MODEL
+                && body["input"].to_string().contains(SIMPLE_SUBAGENT_RESPONSE)
         }),
         "the parent should receive the simple subagent's escalation assessment; requests: {request_models:?}"
     );
@@ -738,8 +779,6 @@ async fn simple_subagent_escalation_spawns_a_regular_model_subagent() -> Result<
         captured_requests.iter().any(|body| {
             body["model"] == REGULAR_MODEL
                 && body["input"].to_string().contains(REGULAR_SUBAGENT_TASK)
-                && body["input"].to_string().contains("agent_message")
-                && !body["input"].to_string().contains("spawn-regular-subagent")
         }),
         "the second subagent should receive a regular-model follow-up task; requests: {request_models:?}"
     );

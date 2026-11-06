@@ -13,10 +13,11 @@ use codex_tools::ToolName;
 use codex_tools::ToolSearchInfo;
 use codex_tools::ToolSpec;
 use futures::future::BoxFuture;
-use serde_json::Value;
 use std::sync::Arc;
 
-const MULTI_AGENT_V2_NAMESPACE_DESCRIPTION: &str = "Tools for spawning and managing sub-agents.";
+/// Shared namespace description for native tools and host extensions.
+pub const MULTI_AGENT_V2_NAMESPACE_DESCRIPTION: &str =
+    "Tools for spawning and managing sub-agents.";
 
 pub(super) fn multi_agent_v2_handler(
     handler: impl CoreToolRuntime + 'static,
@@ -25,18 +26,12 @@ pub(super) fn multi_agent_v2_handler(
     parameters_override: Option<&str>,
 ) -> Arc<dyn CoreToolRuntime> {
     let parameters_override = parameters_override.map(|parameters| -> Result<JsonSchema, &str> {
-        let parameters: Value =
-            serde_json::from_str(parameters).map_err(|_| "schema is not valid JSON")?;
-        if !parameters.is_object() || parameters["type"] != "object" {
-            return Err("schema must declare an object type");
-        }
-        let mut parameters: JsonSchema = serde_json::from_value(parameters)
-            .map_err(|_| "schema uses unsupported JSON Schema structures")?;
+        let mut parameters = codex_tools::parse_catalog_tool_parameters(parameters)?;
         if let ToolSpec::Function(tool) = handler.spec()
             && let Some(properties) = tool.parameters.properties
         {
             // Argument transport requires these markers even without server encryption config.
-            for (name, schema) in properties {
+            for (name, schema) in *properties {
                 if schema.encrypted == Some(true) {
                     let property = parameters
                         .properties
